@@ -1,2 +1,2 @@
 # ARM-assembly-web-server
-lowkey decided to write a basic HTTP web server in ARM AArch46 assembly 
+lowkey decided to write a basic HTTP web server in ARM AArch64 Assembly
