@@ -928,7 +928,7 @@ __close_fd_64_exit:
     ldp x29, x30, [sp], #16
     ret
 
-/*
+/* close_fd 32-bit implementation
 __close_fd_32:                          ; (input: x0 -> file descriptor, output: x0 -> none), force closes a file descriptor
 
     stp x29, x30, [sp, #-16]!
@@ -1469,83 +1469,3 @@ __clear_buf_loop_end:
         .quad cmd_dash_c
         .quad cmd_lsof
         .quad 0
-/*
-_main:
-0000000100000460        stp     x28, x27, [sp, #-0x20]!
-0000000100000464        stp     x29, x30, [sp, #0x10]
-0000000100000468        add     x29, sp, #0x10
-000000010000046c        sub     sp, sp, #0x4b0
-0000000100000470        adrp    x8, 4 ; 0x100004000
-0000000100000474        ldr     x8, [x8, #0x8] ; literal pool symbol address: ___stack_chk_guard
-0000000100000478        ldr     x8, [x8]
-000000010000047c        stur    x8, [x29, #-0x18]
-0000000100000480        mov     x8, sp
-0000000100000484        mov     w1, #0x0
-0000000100000488        str     xzr, [x8]
-000000010000048c        adrp    x0, 0 ; 0x100000000
-0000000100000490        add     x0, x0, #0x5c0 ; literal pool for: "/Users/trangtran/Desktop/coding_files/assembly_shi/ARM-assembly-web-server/template.html"
-0000000100000494        bl      0x10000059c ; symbol stub for: _open
-0000000100000498        str     w0, [sp, #0x14]
-000000010000049c        ldr     w8, [sp, #0x14]
-00000001000004a0        tbz     w8, #0x1f, 0x1000004b0
-00000001000004a4        b       0x1000004a8
-00000001000004a8        mov     w0, #0x1
-00000001000004ac        bl      0x100000584 ; symbol stub for: _exit
-00000001000004b0        ldr     w0, [sp, #0x14]
-00000001000004b4        add     x1, sp, #0x18
-00000001000004b8        bl      0x100000590 ; symbol stub for: _fstat
-00000001000004bc        str     w0, [sp, #0x10]
-00000001000004c0        ldr     w8, [sp, #0x10]
-00000001000004c4        tbz     w8, #0x1f, 0x1000004d4
-00000001000004c8        b       0x1000004cc
-00000001000004cc        mov     w0, #0x1
-00000001000004d0        bl      0x100000584 ; symbol stub for: _exit
-00000001000004d4        ldr     x8, [sp, #0x78]
-00000001000004d8        mov     x9, sp
-00000001000004dc        str     x8, [x9]
-00000001000004e0        adrp    x0, 0 ; 0x100000000
-00000001000004e4        add     x0, x0, #0x619 ; literal pool for: "%lld"
-00000001000004e8        bl      0x1000005a8 ; symbol stub for: _printf
-00000001000004ec        ldr     w0, [sp, #0x14]
-00000001000004f0        add     x1, sp, #0xa8
-00000001000004f4        mov     x2, #0x1f5
-00000001000004f8        bl      0x1000005b4 ; symbol stub for: _read
-00000001000004fc        str     x0, [sp, #0x8]
-0000000100000500        ldr     x8, [sp, #0x8]
-0000000100000504        subs    x8, x8, #0x0
-0000000100000508        b.gt    0x100000518
-000000010000050c        b       0x100000510
-0000000100000510        mov     w0, #0x1
-0000000100000514        bl      0x100000584 ; symbol stub for: _exit
-0000000100000518        add     x0, sp, #0xa8
-000000010000051c        bl      0x1000005a8 ; symbol stub for: _printf
-0000000100000520        ldr     w0, [sp, #0x14]
-0000000100000524        bl      0x100000578 ; symbol stub for: _close
-0000000100000528        tbz     w0, #0x1f, 0x100000538
-000000010000052c        b       0x100000530
-0000000100000530        mov     w0, #0x1
-0000000100000534        bl      0x100000584 ; symbol stub for: _exit
-0000000100000538        ldur    x9, [x29, #-0x18]
-000000010000053c        adrp    x8, 4 ; 0x100004000
-0000000100000540        ldr     x8, [x8, #0x8] ; literal pool symbol address: ___stack_chk_guard
-0000000100000544        ldr     x8, [x8]
-0000000100000548        subs    x8, x8, x9
-000000010000054c        b.eq    0x100000558
-0000000100000550        b       0x100000554
-0000000100000554        bl      0x10000056c ; symbol stub for: ___stack_chk_fail
-0000000100000558        mov     w0, #0x0
-000000010000055c        add     sp, sp, #0x4b0
-0000000100000560        ldp     x29, x30, [sp, #0x10]
-0000000100000564        ldp     x28, x27, [sp], #0x20
-0000000100000568        ret
-
-
-Contents of (__TEXT,__cstring) section
-0000000100000608        6573552f 742f7372 676e6172 6e617274 
-0000000100000618        7365442f 706f746b 646f632f 5f676e69 
-0000000100000628        656c6966 73612f73 626d6573 735f796c 
-0000000100000638        412f6968 612d4d52 6d657373 2d796c62 
-0000000100000648        2d626577 76726573 742f7265 6c706d65 
-0000000100000658        2e657461 6c6d7468 00642500 646c6c25 
-0000000100000668        6c250a00 25000a75 6c 75 00
-*/
