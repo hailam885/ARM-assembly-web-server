@@ -123,9 +123,9 @@ _main_socket_fail_branch_end:
 
     adrp x6, address @PAGE
     add x6, x6, address @PAGEOFF
-    ldr x9, [x6, #2]                    ; htons( PORT )
+    ldrh w0, [x6, #2]                    ; htons( PORT )
     bl __htons_16
-    str x9, [x6, #2]
+    strh w0, [x6, #2]
 
     ; bind()
     mov x0, x25                         ; socket_fd
@@ -133,7 +133,7 @@ _main_socket_fail_branch_end:
     add x1, x1, address @PAGEOFF
     adrp x7, addrlen @PAGE
     add x7, x7, addrlen @PAGEOFF
-    ldr x2, [x7]                        ; sizeof(struct sock_addr)
+    ldr w2, [x7]                        ; sizeof(struct sock_addr)
     mov x16, #104                     ; bind syscall: 104
     svc #0x80
 
@@ -154,10 +154,10 @@ _main_bind_fail_branch:                 ; bind() < 0
 _main_bind_fail_branch_end:
 
     ; listen()
-    ldr x0, [x19]                       ; server file descriptor
+    ldr w0, [x19]                       ; server file descriptor
     adrp x27, backlog @PAGE
     add x27, x27, backlog @PAGEOFF
-    ldr x1, [x27]                       ; backlog count
+    ldr w1, [x27]                       ; backlog count
     mov x16, #106                     ; listen syscall: 106
     svc #0x80
 
@@ -453,6 +453,55 @@ _main_file_read_error:                  ; read() < 0
 
 _main_file_read_error_end:
 
+    adrp x1, file_contents_len @PAGE
+    add x1, x1, file_contents_len @PAGEOFF
+    strh w0, [x1]
+
+    ; print file contents for debugging purposes.
+    mov x0, #1
+    adrp x1, msg_show_file_contents @PAGE
+    add x1, x1, msg_show_file_contents @PAGEOFF
+    mov x2, msg_show_file_contents_len
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    adrp x1, filename @PAGE
+    add x1, x1, filename @PAGEOFF
+    mov x2, filename_len
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    mov x1, #':'
+    mov x2, #1
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    mov x1, #' '
+    mov x2, #1
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    adrp x1, file_contents @PAGE
+    add x1, x1, file_contents @PAGEOFF
+    adrp x3, file_contents_len @PAGE
+    add x3, x3, file_contents_len @PAGEOFf
+    ldrh w2, [x3]
+    mov x16, #4
+    svc #0x80
+
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    mov x1, #'\n'
+    mov x2, #1
+    mov x16, #4
+    svc #0x80
+
     adrp x22, send_buffer @PAGE
     add x22, x22, send_buffer @PAGEOFF
 
@@ -509,7 +558,7 @@ _main_main_server_loop:
     svc #0x80
 
     ; accept()
-    ldr x0, [x19]                       ; server fd
+    ldr w0, [x19]                       ; server fd
     adrp x1, address @PAGE
     add x1, x1, address @PAGEOFF        ; addr to write to
     adrp x2, addrlen @PAGE
@@ -519,12 +568,14 @@ _main_main_server_loop:
 
     adrp x20, client_fd @PAGE
     add x20, x20, client_fd @PAGEOFF
-    str x0, [x20]
+    str w0, [x20]
 
-    cmp x0, #0
+    cmp w0, #0
     bge _main_accept_create_socket_fail_branch_end
 
 _main_accept_create_socket_fail_branch: ; accept() < 0
+
+    mov x25, x0
 
     mov x0, #1
     adrp x1, fail_create_socket @PAGE
@@ -533,6 +584,33 @@ _main_accept_create_socket_fail_branch: ; accept() < 0
     mov x16, #4
     svc #0x80
 
+    mov x0, x25
+    bl __num_to_ascii
+    mov x2, x0
+    mov x0, #1
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    mov x1, #':'
+    mov x2, #1
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    mov x1, #' '
+    mov x2, #1
+    svc #0x80
+
+    mov x0, x25
+    bl __strerror
+    mov x2, x1
+    mov x1, x0
+    mov x0, #1
+    mov x16, #4
+    svc #0x80
+
+    ; purposely crash for now
     b _main_program_exit_bad
 
     ; b _main_main_server_loop
@@ -556,7 +634,7 @@ _main_accept_create_socket_fail_branch_end:
     svc #0x80
 
     ; debugging
-    ldr x0, [x20]
+    ldr w0, [x20]
     bl __num_to_ascii
     mov x2, x0
     mov x0, #1
@@ -571,49 +649,155 @@ _main_accept_create_socket_fail_branch_end:
     mov x16, #4
     svc #0x80
 
-    ; debugging purposes - check open fds
-    mov x16, #2
-    svc #0x80
-    cmp x0, #0
-    beq child_
-    mov x0, #-1
+/*
+; check open fds for this process
+    adrp x0, debug_fd_dir @PAGE
+    add x0, x0, debug_fd_dir @PAGEOFF
     mov x1, #0
-    mov x2, 30
-    mov x16, #6
-    svc #0x80
-    b _main_program_exit_good
-
-child_:
-
-    adrp x0, cmd_shell_path @PAGE
-    add x0, x0, cmd_shell_path @PAGEOFF
-    adrp x1, cmd_lsof_argv @PAGE
-    add x1, x1, cmd_lsof_argv @PAGEOFF
-    mov x2, #0
-    mov x16, #59
+    mov x16, #5
     svc #0x80
 
-    b _main_program_exit_good
+    mov x6, x0                          ; save fd
+    cmp x0, #0
+    bgt _main_check_fd_fail_end
 
-child_end_:
+_main_check_fd_fail:
 
-    ; read()
-    adrp x20, client_fd @PAGE
-    add x20, x20, client_fd @PAGEOFF
-    ldr x0, [x20]                       ; client fd
-    mov x1, x23                         ; buffer to write to
-    mov x2, #30719                      ; max size to read, leave 1 for '\0'
-    mov x16, #3
+    bl __perror
+    b _main_program_exit_bad
+
+_main_check_fd_fail_end:
+
+    mov x7, #0                          ; curr pos in dir
+
+_main_check_fd_loop:
+
+    ; fd already in x0
+    adrp x1, get_fd_buffer @PAGE
+    add x1, x1, get_fd_buffer @PAGEOFF
+    mov x2, #4096
+    mov x3, x7
+    mov x16, #344
+    svc #0x80
+
+    cmp x0, #0
+    ble _main_check_fd_loop_end
+
+    mov x28, x0
+
+    mov x5, #0                          ; offset
+
+_main_check_fd_inner_loop:
+
+    cmp x5, x28
+    blt _main_check_fd_inner_loop_end
+
+    adrp x0, get_fd_buffer @PAGE
+    add x0, x0, get_fd_buffer @PAGEOFF
+    add x0, x0, x5
+
+    add x0, x0, #160
+    adrp x1, str_one_dot @PAGE
+    add x1, x1, str_one_dot @PAGEOFF
+    bl __strcmp
+
+    mov x25, x2
+
+    adrp x1, str_two_dot @PAGE
+    add x1, x1, str_two_dot @PAGEOFF
+    bl __strcmp
+
+    mov x26, x2
+
+    orr x0, x25, x26                    ; if both is non zero, then (x25 OR x26) must be non zero.
+    cmp x0, #0
+
+_main_check_fd_inner_loop_branch:
+
+    adrp x1, get_fd_buffer @PAGE
+    add x1, x1, get_fd_buffer @PAGEOFF
+    ldrh w0, [x1, #20]
+    uxth x0, w0
+    bl __num_to_ascii
+    mov x25, x0
+    mov x26, x1
+
+    mov x0, #1
+    adrp x1, debug_print_fd @PAGE
+    add x1, x1, debug_print_fd @PAGEOFF
+    mov x2, debug_print_fd_len
+    mov x16, #4
+    svc #0x80
+
+    adrp x1, process_id @PAGE
+    add x1, x1, process_id @PAGEOFF
+    str w0, [x1]
+    bl __num_to_ascii
+
+    mov x2, x0
+    mov x0, #1
+    mov x16, #4
     svc #0x80
 
     mov x0, #1
-    adrp x1, incoming_buffer @PAGE
-    add x1, x1, incoming_buffer @PAGEOFF
-    mov x2, #10000
+    mov x1, #','
+    mov x2, #1
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    mov x1, x26
+    mov x2, x25
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    mov x1, #'\n'
+    mov x2, #1
+    mov x16, #4
+    svc #0x80
+
+_main_check_fd_inner_loop_branch_end:
+
+    adrp x0, get_fd_buffer @PAGE
+    add x0, x0, get_fd_buffer @PAGEOFF
+    ldrh w2, [x0, #16]
+    add x5, x5, x2, uxtx #0
+
+    b _main_check_fd_inner_loop
+
+_main_check_fd_inner_loop_end:
+
+    b _main_check_fd_loop
+
+_main_check_fd_loop_end:
+
+    bl __strerror                         ; at least see what error it is
+    mov x2, x1
+    mov x1, x0
+    mov x0, #1
     mov x16, #4
     svc #0x80
 
     b _main_program_exit_good
+*/
+
+    ; read()
+    adrp x20, client_fd @PAGE
+    add x20, x20, client_fd @PAGEOFF
+    ldr w0, [x20]                       ; client fd
+    adrp x1, incoming_buffer @PAGE
+    add x1, x1, incoming_buffer @PAGEOFF
+    mov x2, #30720                      ; max size to read, leave 1 for '\0'
+    mov x16, #3
+    svc #0x80
+
+    ; mov x2, x0
+    ; mov x0, #1
+    ; adrp x1, incoming_buffer @PAGE
+    ; add x1, x1, incoming_buffer @PAGEOFF
+    ; mov x16, #4
+    ; svc #0x80
 
     ; check bytes read
     cmp x0, #0
@@ -642,7 +826,8 @@ _main_read_branch_success:
     svc #0x80
 
     mov x0, #1
-    mov x1, x23                         ; print incoming request
+    adrp x1, incoming_buffer @PAGE
+    add x1, x1, incoming_buffer @PAGEOFF
     mov x2, x12
     mov x16, #4
     svc #0x80
@@ -893,13 +1078,14 @@ _main_program_exit_bad:                 ; exit w/ exit code 1: bad
 
 ; functions
 
-__htons_16:                             ; x9 -> input, x9 -> output, uint16 implementation
+__htons_16:                             ; x0 -> input, x0 -> output, uint16 implementation
 
     stp x29, x30, [sp, #-16]!
     mov x29, sp
-    lsl x10, x9, #8                     ; new MSB
-    lsr x11, x9, #8                     ; new LSB
-    orr x9, x10, x11                    ; MSB | LSB
+    lsl x10, x0, #8                     ; new MSB
+    lsr x11, x0, #8                     ; new LSB
+    orr x0, x10, x11                    ; MSB | LSB
+    ; and x0, #0xffff
     ldp x29, x30, [sp], #16
     ret
 
@@ -992,6 +1178,64 @@ __strcat_copy_loop:
     ldp x29, x30, [sp], #16
     ret
 
+__strncat:                              ; x0 += x1, both .asciz only, input: x0, x1 -> str addr, x2 -> x0's max buffer size, x3 -> length to copy from x1; output: x0, x1 -> str addr
+
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
+    mov x5, x2
+    mov x6, x3
+
+    mov x2, x0
+    mov x0, x1
+    bl __strlen
+
+    mov x7, x0
+    add x7, x7, x6
+    sub x7, x7, #1                      ; assuming x0 has null terminator, doesn't count
+    cmp x7, x5
+    bgt __strncat_exit
+
+    mov x3, x0
+    mov x0, x2
+
+__strncat_copy_loop:
+
+    sub x6, x6, #1
+    cmp x6, #0
+    ble __strncat_exit
+    ldrb w4, [x1], #1
+    strb w4, [x0, x3]
+    cbnz w4, __strncat_copy_loop
+
+__strncat_exit:
+
+    ldp x29, x30, [sp], #16
+    ret
+
+__strcmp:                               ; input: x0, x1 -> string addr, output: x2 = (x0 <=> x1)
+
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
+__strcmp_loop:
+
+    ldrb w3, [x1], #1
+    ldrb w4, [x0], #1
+    cmp w3, w4
+    beq __strcmp_loop
+
+    mov x5, #1
+    mov x6, #-1
+
+    cmp w3, w4
+    csel x2, x5, x2, gt
+    csel x2, x6, x2, lt
+    csel x2, xzr, x2, eq
+
+    ldp x29, x30, [sp], #16
+    ret
+
 __ascii_to_num:                         ; (convert ascii string to number, input: x0 -> string addr, output: x0 -> number)
     ; save registers
     stp x29, x30, [sp, #-16]!
@@ -1068,175 +1312,994 @@ __num_to_ascii_exit:
     ldp x29, x30, [sp], #16
     ret
 
-__strerror:                             ; input: x0 -> code, output: x0 -> error str addr, x1 -> error str len
-
+__strerror:                             ; input: x0 -> error code, output: x0 -> error str addr, x1 -> error str len
     stp x29, x30, [sp, #-16]!
     mov x29, sp
 
     ; check input against accepted/recognized error codes, otherwise return unknown
+    cmp x0, #0
+    beq __strerror_err_0
     cmp x0, #1
-    beq __strerror_err_eperm
+    beq __strerror_err_1
     cmp x0, #2
-    beq __strerror_err_enoent
+    beq __strerror_err_2
     cmp x0, #3
-    beq __strerror_err_esrch
+    beq __strerror_err_3
     cmp x0, #4
-    beq __strerror_err_eintr
+    beq __strerror_err_4
     cmp x0, #5
-    beq __strerror_err_eio
+    beq __strerror_err_5
     cmp x0, #6
-    beq __strerror_err_enxio
+    beq __strerror_err_6
+    cmp x0, #7
+    beq __strerror_err_7
+    cmp x0, #8
+    beq __strerror_err_8
     cmp x0, #9
-    beq __strerror_err_ebadf
+    beq __strerror_err_9
+    cmp x0, #10
+    beq __strerror_err_10
+    cmp x0, #11
+    beq __strerror_err_11
+    cmp x0, #12
+    beq __strerror_err_12
     cmp x0, #13
-    beq __strerror_err_eacces
+    beq __strerror_err_13
     cmp x0, #14
-    beq __strerror_err_efault
+    beq __strerror_err_14
+    cmp x0, #15
+    beq __strerror_err_15
+    cmp x0, #16
+    beq __strerror_err_16
     cmp x0, #17
-    beq __strerror_err_eexist
+    beq __strerror_err_17
+    cmp x0, #18
+    beq __strerror_err_18
+    cmp x0, #19
+    beq __strerror_err_19
     cmp x0, #20
-    beq __strerror_err_enotdir
+    beq __strerror_err_20
     cmp x0, #21
-    beq __strerror_err_eisdir
+    beq __strerror_err_21
     cmp x0, #22
-    beq __strerror_err_einval
+    beq __strerror_err_22
+    cmp x0, #23
+    beq __strerror_err_23
     cmp x0, #24
-    beq __strerror_err_emfile
+    beq __strerror_err_24
+    cmp x0, #25
+    beq __strerror_err_25
+    cmp x0, #26
+    beq __strerror_err_26
+    cmp x0, #27
+    beq __strerror_err_27
     cmp x0, #28
-    beq __strerror_err_enospc
+    beq __strerror_err_28
+    cmp x0, #29
+    beq __strerror_err_29
     cmp x0, #30
-    beq __strerror_err_erofs
+    beq __strerror_err_30
+    cmp x0, #31
+    beq __strerror_err_31
+    cmp x0, #32
+    beq __strerror_err_32
+    cmp x0, #33
+    beq __strerror_err_33
+    cmp x0, #34
+    beq __strerror_err_34
+    cmp x0, #35
+    beq __strerror_err_35
+    cmp x0, #36
+    beq __strerror_err_36
+    cmp x0, #37
+    beq __strerror_err_37
+    cmp x0, #38
+    beq __strerror_err_38
+    cmp x0, #39
+    beq __strerror_err_39
+    cmp x0, #40
+    beq __strerror_err_40
+    cmp x0, #41
+    beq __strerror_err_41
+    cmp x0, #42
+    beq __strerror_err_42
+    cmp x0, #43
+    beq __strerror_err_43
+    cmp x0, #44
+    beq __strerror_err_44
+    cmp x0, #45
+    beq __strerror_err_45
+    cmp x0, #46
+    beq __strerror_err_46
+    cmp x0, #47
+    beq __strerror_err_47
+    cmp x0, #48
+    beq __strerror_err_48
+    cmp x0, #49
+    beq __strerror_err_49
+    cmp x0, #50
+    beq __strerror_err_50
+    cmp x0, #51
+    beq __strerror_err_51
+    cmp x0, #52
+    beq __strerror_err_52
+    cmp x0, #53
+    beq __strerror_err_53
+    cmp x0, #54
+    beq __strerror_err_54
+    cmp x0, #55
+    beq __strerror_err_55
+    cmp x0, #56
+    beq __strerror_err_56
+    cmp x0, #57
+    beq __strerror_err_57
+    cmp x0, #58
+    beq __strerror_err_58
+    cmp x0, #59
+    beq __strerror_err_59
+    cmp x0, #60
+    beq __strerror_err_60
+    cmp x0, #61
+    beq __strerror_err_61
+    cmp x0, #62
+    beq __strerror_err_62
     cmp x0, #63
-    beq __strerror_err_enametoolong
+    beq __strerror_err_63
+    cmp x0, #64
+    beq __strerror_err_64
+    cmp x0, #65
+    beq __strerror_err_65
+    cmp x0, #66
+    beq __strerror_err_66
+    cmp x0, #67
+    beq __strerror_err_67
+    cmp x0, #68
+    beq __strerror_err_68
+    cmp x0, #69
+    beq __strerror_err_69
+    cmp x0, #70
+    beq __strerror_err_70
+    cmp x0, #71
+    beq __strerror_err_71
+    cmp x0, #72
+    beq __strerror_err_72
+    cmp x0, #73
+    beq __strerror_err_73
+    cmp x0, #74
+    beq __strerror_err_74
+    cmp x0, #75
+    beq __strerror_err_75
+    cmp x0, #76
+    beq __strerror_err_76
+    cmp x0, #77
+    beq __strerror_err_77
+    cmp x0, #78
+    beq __strerror_err_78
+    cmp x0, #79
+    beq __strerror_err_79
+    cmp x0, #80
+    beq __strerror_err_80
+    cmp x0, #81
+    beq __strerror_err_81
+    cmp x0, #82
+    beq __strerror_err_82
+    cmp x0, #83
+    beq __strerror_err_83
+    cmp x0, #84
+    beq __strerror_err_84
+    cmp x0, #85
+    beq __strerror_err_85
+    cmp x0, #86
+    beq __strerror_err_86
+    cmp x0, #87
+    beq __strerror_err_87
+    cmp x0, #88
+    beq __strerror_err_88
+    cmp x0, #89
+    beq __strerror_err_89
+    cmp x0, #90
+    beq __strerror_err_90
+    cmp x0, #91
+    beq __strerror_err_91
+    cmp x0, #92
+    beq __strerror_err_92
+    cmp x0, #93
+    beq __strerror_err_93
+    cmp x0, #94
+    beq __strerror_err_94
+    cmp x0, #95
+    beq __strerror_err_95
+    cmp x0, #96
+    beq __strerror_err_96
+    cmp x0, #97
+    beq __strerror_err_97
+    cmp x0, #98
+    beq __strerror_err_98
+    cmp x0, #99
+    beq __strerror_err_99
+    cmp x0, #100
+    beq __strerror_err_100
+    cmp x0, #101
+    beq __strerror_err_101
+    cmp x0, #102
+    beq __strerror_err_102
+    cmp x0, #103
+    beq __strerror_err_103
+    cmp x0, #104
+    beq __strerror_err_104
+    cmp x0, #105
+    beq __strerror_err_105
+    cmp x0, #106
+    beq __strerror_err_106
+    cmp x0, #107
+    beq __strerror_err_107
+
     b __strerror_err_unknown
 
-__strerror_err_eperm:                   ; operation not permitted
+__strerror_err_0:                       ; 0
 
-    adrp x0, err_str_eperm @PAGE
-    add x0, x0, err_str_eperm @PAGEOFF
-    mov x1, err_str_eperm_len
+    adrp x0, err_str_0 @PAGE
+    add x0, x0, err_str_0 @PAGEOFF
+    mov x1, #18
     b __strerror_exit
 
-__strerror_err_enoent:                  ; no entry/doesn't exist
+__strerror_err_1:                       ; EPERM
 
-    adrp x0, err_str_enoent @PAGE
-    add x0, x0, err_str_enoent @PAGEOFF
-    mov x1, err_str_enoent_len
+    adrp x0, err_str_1 @PAGE
+    add x0, x0, err_str_1 @PAGEOFF
+    mov x1, #23
     b __strerror_exit
 
-__strerror_err_esrch:                   ; no such process
+__strerror_err_2:                       ; ENOENT
 
-    adrp x0, err_str_esrch @PAGE
-    add x0, x0, err_str_esrch @PAGEOFF
-    mov x1, err_str_esrch_len
+    adrp x0, err_str_2 @PAGE
+    add x0, x0, err_str_2 @PAGEOFF
+    mov x1, #26
     b __strerror_exit
 
-__strerror_err_eintr:                   ; interrupted system call
+__strerror_err_3:                       ; ESRCH
 
-    adrp x0, err_str_eintr @PAGE
-    add x0, x0, err_str_eintr @PAGEOFF
-    mov x1, err_str_eintr_len
+    adrp x0, err_str_3 @PAGE
+    add x0, x0, err_str_3 @PAGEOFF
+    mov x1, #15
     b __strerror_exit
 
-__strerror_err_eio:                     ; input/output error
+__strerror_err_4:                       ; EINTR
 
-    adrp x0, err_str_eio @PAGE
-    add x0, x0, err_str_eio @PAGEOFF
-    mov x1, err_str_eio_len
+    adrp x0, err_str_4 @PAGE
+    add x0, x0, err_str_4 @PAGEOFF
+    mov x1, #22
     b __strerror_exit
 
-__strerror_err_enxio:                   ; no such device/address
+__strerror_err_5:                       ; EIO
 
-    adrp x0, err_str_enxio @PAGE
-    add x0, x0, err_str_enxio @PAGEOFF
-    mov x1, err_str_enxio_len
+    adrp x0, err_str_5 @PAGE
+    add x0, x0, err_str_5 @PAGEOFF
+    mov x1, #17
     b __strerror_exit
 
-__strerror_err_ebadf:                   ; bad file desriptor
+__strerror_err_6:                       ; ENXIO
 
-    adrp x0, err_str_ebadf @PAGE
-    add x0, x0, err_str_ebadf @PAGEOFF
-    mov x1, err_str_ebadf_len
+    adrp x0, err_str_6 @PAGE
+    add x0, x0, err_str_6 @PAGEOFF
+    mov x1, #21
     b __strerror_exit
 
-__strerror_err_eacces:                  ; permission denied
+__strerror_err_7:                       ; E2BIG
 
-    adrp x0, err_str_eacces @PAGE
-    add x0, x0, err_str_eacces @PAGEOFF
-    mov x1, err_str_eacces_len
+    adrp x0, err_str_7 @PAGE
+    add x0, x0, err_str_7 @PAGEOFF
+    mov x1, #22
     b __strerror_exit
 
-__strerror_err_efault:                  ; bad address
+__strerror_err_8:                       ; ENOEXEC
 
-    adrp x0, err_str_efault @PAGE
-    add x0, x0, err_str_efault @PAGEOFF
-    mov x1, err_str_efault_len
+    adrp x0, err_str_8 @PAGE
+    add x0, x0, err_str_8 @PAGEOFF
+    mov x1, #18
     b __strerror_exit
 
-__strerror_err_eexist:                  ; file/dir already exist
+__strerror_err_9:                       ; EBADF
 
-    adrp x0, err_str_efault @PAGE
-    add x0, x0, err_str_efault @PAGEOFF
-    mov x1, err_str_efault_len
+    adrp x0, err_str_9 @PAGE
+    add x0, x0, err_str_9 @PAGEOFF
+    mov x1, #19
     b __strerror_exit
 
-__strerror_err_enotdir:                 ; treating file as folder and vice versa
+__strerror_err_10:                      ; ECHILD
 
-    adrp x0, err_str_enotdir @PAGE
-    add x0, x0, err_str_enotdir @PAGEOFF
-    mov x1, err_str_enotdir_len
+    adrp x0, err_str_10 @PAGE
+    add x0, x0, err_str_10 @PAGEOFF
+    mov x1, #17
     b __strerror_exit
 
-__strerror_err_eisdir:                  ; treating directory as file
+__strerror_err_11:                      ; EDEADLK
 
-    adrp x0, err_str_eisdir @PAGE
-    add x0, x0, err_str_eisdir @PAGEOFF
-    mov x1, err_str_eisdir_len
+    adrp x0, err_str_11 @PAGE
+    add x0, x0, err_str_11 @PAGEOFF
+    mov x1, #24
     b __strerror_exit
 
-__strerror_err_einval:                  ; invalid argument/value
+__strerror_err_12:                      ; ENOMEM
 
-    adrp x0, err_str_einval @PAGE
-    add x0, x0, err_str_einval @PAGEOFF
-    mov x1, err_str_einval_len
+    adrp x0, err_str_12 @PAGE
+    add x0, x0, err_str_12 @PAGEOFF
+    mov x1, #22
     b __strerror_exit
 
-__strerror_err_emfile:                  ; maxed out max file descriptor per process
+__strerror_err_13:                      ; EACCES
 
-    adrp x0, err_str_emfile @PAGE
-    add x0, x0, err_str_emfile @PAGEOFF
-    mov x1, err_str_emfile_len
+    adrp x0, err_str_13 @PAGE
+    add x0, x0, err_str_13 @PAGEOFF
+    mov x1, #17
     b __strerror_exit
 
-__strerror_err_enospc:                  ; no space, typically refers to disk
+__strerror_err_14:                      ; EFAULT
 
-    adrp x0, err_str_enospc @PAGE
-    add x0, x0, err_str_enospc @PAGEOFF
-    mov x1, err_str_enospc_len
+    adrp x0, err_str_14 @PAGE
+    add x0, x0, err_str_14 @PAGEOFF
+    mov x1, #11
     b __strerror_exit
 
-__strerror_err_erofs:                   ; write to read only file
+__strerror_err_15:                      ; ENOTBLK
 
-    adrp x0, err_str_erofs @PAGE
-    add x0, x0, err_str_erofs @PAGEOFF
-    mov x1, err_str_erofs_len
+    adrp x0, err_str_15 @PAGE
+    add x0, x0, err_str_15 @PAGEOFF
+    mov x1, #21
     b __strerror_exit
 
-__strerror_err_enametoolong:            ; literally what it means
+__strerror_err_16:                      ; EBUSY
 
-    adrp x0, err_str_enametoolong @PAGE
-    add x0, x0, err_str_enametoolong @PAGEOFF
-    mov x1, err_str_enametoolong_len
+    adrp x0, err_str_16 @PAGE
+    add x0, x0, err_str_16 @PAGEOFF
+    mov x1, #13
     b __strerror_exit
 
-__strerror_err_unknown:                 ; for unknown errors
+__strerror_err_17:                      ; EEXIST
+
+    adrp x0, err_str_17 @PAGE
+    add x0, x0, err_str_17 @PAGEOFF
+    mov x1, #11
+    b __strerror_exit
+
+__strerror_err_18:                      ; EXDEV
+
+    adrp x0, err_str_18 @PAGE
+    add x0, x0, err_str_18 @PAGEOFF
+    mov x1, #17
+    b __strerror_exit
+
+__strerror_err_19:                      ; ENODEV
+
+    adrp x0, err_str_19 @PAGE
+    add x0, x0, err_str_19 @PAGEOFF
+    mov x1, #31
+    b __strerror_exit
+
+__strerror_err_20:                      ; ENOTDIR
+
+    adrp x0, err_str_20 @PAGE
+    add x0, x0, err_str_20 @PAGEOFF
+    mov x1, #16
+    b __strerror_exit
+
+__strerror_err_21:                      ; EISDIR
+
+    adrp x0, err_str_21 @PAGE
+    add x0, x0, err_str_21 @PAGEOFF
+    mov x1, #14
+    b __strerror_exit
+
+__strerror_err_22:                      ; EINVAL
+
+    adrp x0, err_str_22 @PAGE
+    add x0, x0, err_str_22 @PAGEOFF
+    mov x1, #16
+    b __strerror_exit
+
+__strerror_err_23:                      ; ENFILE
+
+    adrp x0, err_str_23 @PAGE
+    add x0, x0, err_str_23 @PAGEOFF
+    mov x1, #31
+    b __strerror_exit
+
+__strerror_err_24:                      ; EMFILE
+
+    adrp x0, err_str_24 @PAGE
+    add x0, x0, err_str_24 @PAGEOFF
+    mov x1, #20
+    b __strerror_exit
+
+__strerror_err_25:                      ; ENOTTY
+
+    adrp x0, err_str_25 @PAGE
+    add x0, x0, err_str_25 @PAGEOFF
+    mov x1, #29
+    b __strerror_exit
+
+__strerror_err_26:                      ; ETXTBSY
+
+    adrp x0, err_str_26 @PAGE
+    add x0, x0, err_str_26 @PAGEOFF
+    mov x1, #14
+    b __strerror_exit
+
+__strerror_err_27:                      ; EFBIG
+
+    adrp x0, err_str_27 @PAGE
+    add x0, x0, err_str_27 @PAGEOFF
+    mov x1, #14
+    b __strerror_exit
+
+__strerror_err_28:                      ; ENOSPC
+
+    adrp x0, err_str_28 @PAGE
+    add x0, x0, err_str_28 @PAGEOFF
+    mov x1, #24
+    b __strerror_exit
+
+__strerror_err_29:                      ; ESPIPE
+
+    adrp x0, err_str_29 @PAGE
+    add x0, x0, err_str_29 @PAGEOFF
+    mov x1, #12
+    b __strerror_exit
+
+__strerror_err_30:                      ; EROFS
+
+    adrp x0, err_str_30 @PAGE
+    add x0, x0, err_str_30 @PAGEOFF
+    mov x1, #22
+    b __strerror_exit
+
+__strerror_err_31:                      ; EMLINK
+
+    adrp x0, err_str_31 @PAGE
+    add x0, x0, err_str_31 @PAGEOFF
+    mov x1, #14
+    b __strerror_exit
+
+__strerror_err_32:                      ; EPIPE
+
+    adrp x0, err_str_32 @PAGE
+    add x0, x0, err_str_32 @PAGEOFF
+    mov x1, #11
+    b __strerror_exit
+
+__strerror_err_33:                      ; EDOM
+
+    adrp x0, err_str_33 @PAGE
+    add x0, x0, err_str_33 @PAGEOFF
+    mov x1, #33
+    b __strerror_exit
+
+__strerror_err_34:                      ; ERANGE
+
+    adrp x0, err_str_34 @PAGE
+    add x0, x0, err_str_34 @PAGEOFF
+    mov x1, #16
+    b __strerror_exit
+
+__strerror_err_35:                      ; EAGAIN
+
+    adrp x0, err_str_35 @PAGE
+    add x0, x0, err_str_35 @PAGEOFF
+    mov x1, #31
+    b __strerror_exit
+
+__strerror_err_36:                      ; EINPROGRESS
+
+    adrp x0, err_str_36 @PAGE
+    add x0, x0, err_str_36 @PAGEOFF
+    mov x1, #24
+    b __strerror_exit
+
+__strerror_err_37:                      ; EALREADY
+
+    adrp x0, err_str_37 @PAGE
+    add x0, x0, err_str_37 @PAGEOFF
+    mov x1, #27
+    b __strerror_exit
+
+__strerror_err_38:                      ; ENOTSOCK
+
+    adrp x0, err_str_38 @PAGE
+    add x0, x0, err_str_38 @PAGEOFF
+    mov x1, #28
+    b __strerror_exit
+
+__strerror_err_39:                      ; EDESTADDRREQ
+
+    adrp x0, err_str_39 @PAGE
+    add x0, x0, err_str_39 @PAGEOFF
+    mov x1, #26
+    b __strerror_exit
+
+__strerror_err_40:                      ; EMSGSIZE
+
+    adrp x0, err_str_40 @PAGE
+    add x0, x0, err_str_40 @PAGEOFF
+    mov x1, #16
+    b __strerror_exit
+
+__strerror_err_41:                      ; EPROTOTYPE
+
+    adrp x0, err_str_41 @PAGE
+    add x0, x0, err_str_41 @PAGEOFF
+    mov x1, #29
+    b __strerror_exit
+
+__strerror_err_42:                      ; ENOPROTOOPT
+
+    adrp x0, err_str_42 @PAGE
+    add x0, x0, err_str_42 @PAGEOFF
+    mov x1, #20
+    b __strerror_exit
+
+__strerror_err_43:                      ; EPROTONOSUPPORT
+
+    adrp x0, err_str_43 @PAGE
+    add x0, x0, err_str_43 @PAGEOFF
+    mov x1, #23
+    b __strerror_exit
+
+__strerror_err_44:                      ; ESOCKTNOSUPPORT
+
+    adrp x0, err_str_44 @PAGE
+    add x0, x0, err_str_44 @PAGEOFF
+    mov x1, #24
+    b __strerror_exit
+
+__strerror_err_45:                      ; ENOTSUP
+
+    adrp x0, err_str_45 @PAGE
+    add x0, x0, err_str_45 @PAGEOFF
+    mov x1, #21
+    b __strerror_exit
+
+__strerror_err_46:                      ; EPFNOSUPPORT
+
+    adrp x0, err_str_46 @PAGE
+    add x0, x0, err_str_46 @PAGEOFF
+    mov x1, #28
+    b __strerror_exit
+
+__strerror_err_47:                      ; EAFNOSUPPORT
+
+    adrp x0, err_str_47 @PAGE
+    add x0, x0, err_str_47 @PAGEOFF
+    mov x1, #44
+    b __strerror_exit
+
+__strerror_err_48:                      ; EADDRINUSE
+
+    adrp x0, err_str_48 @PAGE
+    add x0, x0, err_str_48 @PAGEOFF
+    mov x1, #22
+    b __strerror_exit
+
+__strerror_err_49:                      ; EADDRNOTAVAIL
+
+    adrp x0, err_str_49 @PAGE
+    add x0, x0, err_str_49 @PAGEOFF
+    mov x1, #28
+    b __strerror_exit
+
+__strerror_err_50:                      ; ENETDOWN
+
+    adrp x0, err_str_50 @PAGE
+    add x0, x0, err_str_50 @PAGEOFF
+    mov x1, #14
+    b __strerror_exit
+
+__strerror_err_51:                      ; ENETUNREACH
+
+    adrp x0, err_str_51 @PAGE
+    add x0, x0, err_str_51 @PAGEOFF
+    mov x1, #21
+    b __strerror_exit
+
+__strerror_err_52:                      ; ENETRESET
+
+    adrp x0, err_str_52 @PAGE
+    add x0, x0, err_str_52 @PAGEOFF
+    mov x1, #33
+    b __strerror_exit
+
+__strerror_err_53:                      ; ECONNABORTED
+
+    adrp x0, err_str_53 @PAGE
+    add x0, x0, err_str_53 @PAGEOFF
+    mov x1, #32
+    b __strerror_exit
+
+__strerror_err_54:                      ; ECONNRESET
+
+    adrp x0, err_str_54 @PAGE
+    add x0, x0, err_str_54 @PAGEOFF
+    mov x1, #23
+    b __strerror_exit
+
+__strerror_err_55:                      ; ENOBUFS
+
+    adrp x0, err_str_55 @PAGE
+    add x0, x0, err_str_55 @PAGEOFF
+    mov x1, #26
+    b __strerror_exit
+
+__strerror_err_56:                      ; EISCONN
+
+    adrp x0, err_str_56 @PAGE
+    add x0, x0, err_str_56 @PAGEOFF
+    mov x1, #27
+    b __strerror_exit
+
+__strerror_err_57:                      ; ENOTCONN
+
+    adrp x0, err_str_57 @PAGE
+    add x0, x0, err_str_57 @PAGEOFF
+    mov x1, #21
+    b __strerror_exit
+
+__strerror_err_58:                      ; ESHUTDOWN
+
+    adrp x0, err_str_58 @PAGE
+    add x0, x0, err_str_58 @PAGEOFF
+    mov x1, #31
+    b __strerror_exit
+
+__strerror_err_59:                      ; ETOOMANYREFS
+
+    adrp x0, err_str_59 @PAGE
+    add x0, x0, err_str_59 @PAGEOFF
+    mov x1, #35
+    b __strerror_exit
+
+__strerror_err_60:                      ; ETIMEDOUT
+
+    adrp x0, err_str_60 @PAGE
+    add x0, x0, err_str_60 @PAGEOFF
+    mov x1, #18
+    b __strerror_exit
+
+__strerror_err_61:                      ; ECONNREFUSED
+
+    adrp x0, err_str_61 @PAGE
+    add x0, x0, err_str_61 @PAGEOFF
+    mov x1, #18
+    b __strerror_exit
+
+__strerror_err_62:                      ; ELOOP
+
+    adrp x0, err_str_62 @PAGE
+    add x0, x0, err_str_62 @PAGEOFF
+    mov x1, #33
+    b __strerror_exit
+
+__strerror_err_63:                      ; ENAMETOOLONG
+
+    adrp x0, err_str_63 @PAGE
+    add x0, x0, err_str_63 @PAGEOFF
+    mov x1, #18
+    b __strerror_exit
+
+__strerror_err_64:                      ; EHOSTDOWN
+
+    adrp x0, err_str_64 @PAGE
+    add x0, x0, err_str_64 @PAGEOFF
+    mov x1, #12
+    b __strerror_exit
+
+__strerror_err_65:                      ; EHOSTUNREACH
+
+    adrp x0, err_str_65 @PAGE
+    add x0, x0, err_str_65 @PAGEOFF
+    mov x1, #16
+    b __strerror_exit
+
+__strerror_err_66:                      ; ENOTEMPTY
+
+    adrp x0, err_str_66 @PAGE
+    add x0, x0, err_str_66 @PAGEOFF
+    mov x1, #18
+    b __strerror_exit
+
+__strerror_err_67:                      ; EPROCLIM
+
+    adrp x0, err_str_67 @PAGE
+    add x0, x0, err_str_67 @PAGEOFF
+    mov x1, #18
+    b __strerror_exit
+
+__strerror_err_68:                      ; EUSERS
+
+    adrp x0, err_str_68 @PAGE
+    add x0, x0, err_str_68 @PAGEOFF
+    mov x1, #14
+    b __strerror_exit
+
+__strerror_err_69:                      ; EDQUOT
+
+    adrp x0, err_str_69 @PAGE
+    add x0, x0, err_str_69 @PAGEOFF
+    mov x1, #18
+    b __strerror_exit
+
+__strerror_err_70:                      ; ESTALE
+
+    adrp x0, err_str_70 @PAGE
+    add x0, x0, err_str_70 @PAGEOFF
+    mov x1, #20
+    b __strerror_exit
+
+__strerror_err_71:                      ; EREMOTE
+
+    adrp x0, err_str_71 @PAGE
+    add x0, x0, err_str_71 @PAGEOFF
+    mov x1, #32
+    b __strerror_exit
+
+__strerror_err_72:                      ; EBADRPC
+
+    adrp x0, err_str_72 @PAGE
+    add x0, x0, err_str_72 @PAGEOFF
+    mov x1, #18
+    b __strerror_exit
+
+__strerror_err_73:                      ; ERPCMISMATCH
+
+    adrp x0, err_str_73 @PAGE
+    add x0, x0, err_str_73 @PAGEOFF
+    mov x1, #17
+    b __strerror_exit
+
+__strerror_err_74:                      ; EPROGUNAVAIL
+
+    adrp x0, err_str_74 @PAGE
+    add x0, x0, err_str_74 @PAGEOFF
+    mov x1, #21
+    b __strerror_exit
+
+__strerror_err_75:                      ; EPROGMISMATCH
+
+    adrp x0, err_str_75 @PAGE
+    add x0, x0, err_str_75 @PAGEOFF
+    mov x1, #21
+    b __strerror_exit
+
+__strerror_err_76:                      ; EPROCUNAVAIL
+
+    adrp x0, err_str_76 @PAGE
+    add x0, x0, err_str_76 @PAGEOFF
+    mov x1, #26
+    b __strerror_exit
+
+__strerror_err_77:                      ; ENOLCK
+
+    adrp x0, err_str_77 @PAGE
+    add x0, x0, err_str_77 @PAGEOFF
+    mov x1, #19
+    b __strerror_exit
+
+__strerror_err_78:                      ; ENOSYS
+
+    adrp x0, err_str_78 @PAGE
+    add x0, x0, err_str_78 @PAGEOFF
+    mov x1, #23
+    b __strerror_exit
+
+__strerror_err_79:                      ; EFTYPE
+
+    adrp x0, err_str_79 @PAGE
+    add x0, x0, err_str_79 @PAGEOFF
+    mov x1, #31
+    b __strerror_exit
+
+__strerror_err_80:                      ; EAUTH
+
+    adrp x0, err_str_80 @PAGE
+    add x0, x0, err_str_80 @PAGEOFF
+    mov x1, #19
+    b __strerror_exit
+
+__strerror_err_81:                      ; ENEEDAUTH
+
+    adrp x0, err_str_81 @PAGE
+    add x0, x0, err_str_81 @PAGEOFF
+    mov x1, #18
+    b __strerror_exit
+
+__strerror_err_82:                      ; EPWROFF
+
+    adrp x0, err_str_82 @PAGE
+    add x0, x0, err_str_82 @PAGEOFF
+    mov x1, #19
+    b __strerror_exit
+
+__strerror_err_83:                      ; EDEVERR
+
+    adrp x0, err_str_83 @PAGE
+    add x0, x0, err_str_83 @PAGEOFF
+    mov x1, #12
+    b __strerror_exit
+
+__strerror_err_84:                      ; EOVERFLOW
+
+    adrp x0, err_str_84 @PAGE
+    add x0, x0, err_str_84 @PAGEOFF
+    mov x1, #39
+    b __strerror_exit
+
+__strerror_err_85:                      ; EBADEXEC
+
+    adrp x0, err_str_85 @PAGE
+    add x0, x0, err_str_85 @PAGEOFF
+    mov x1, #32
+    b __strerror_exit
+
+__strerror_err_86:                      ; EBADARCH
+
+    adrp x0, err_str_86  @PAGE
+    add x0, x0, err_str_86 @PAGEOFF
+    mov x1, #27
+    b __strerror_exit
+
+__strerror_err_87:                      ; ESHLIBVERS
+
+    adrp x0, err_str_87 @PAGE
+    add x0, x0, err_str_87 @PAGEOFF
+    mov x1, #30
+    b __strerror_exit
+
+__strerror_err_88:                      ; EBADMACHO
+
+    adrp x0, err_str_88 @PAGE
+    add x0, x0, err_str_88 @PAGEOFF
+    mov x1, #20
+    b __strerror_exit
+
+__strerror_err_89:                      ; ECANCELED
+
+    adrp x0, err_str_89 @PAGE
+    add x0, x0, err_str_89 @PAGEOFF
+    mov x1, #18
+    b __strerror_exit
+
+__strerror_err_90:                      ; EIDRM
+
+    adrp x0, err_str_90 @PAGE
+    add x0, x0, err_str_90 @PAGEOFF
+    mov x1, #18
+    b __strerror_exit
+
+__strerror_err_91:                      ; ENOMSG
+
+    adrp x0, err_str_91 @PAGE
+    add x0, x0, err_str_91 @PAGEOFF
+    mov x1, #28
+    b __strerror_exit
+
+__strerror_err_92:                      ; EILSEQ
+
+    adrp x0, err_str_92 @PAGE
+    add x0, x0, err_str_92 @PAGEOFF
+    mov x1, #20
+    b __strerror_exit
+
+__strerror_err_93:                      ; ENOATTR
+
+    adrp x0, err_str_93 @PAGE
+    add x0, x0, err_str_93 @PAGEOFF
+    mov x1, #19
+    b __strerror_exit
+
+__strerror_err_94:                      ; EBADMSG
+
+    adrp x0, err_str_94 @PAGE
+    add x0, x0, err_str_94 @PAGEOFF
+    mov x1, #11
+    b __strerror_exit
+
+__strerror_err_95:                      ; EMULTIHOP
+
+    adrp x0, err_str_95 @PAGE
+    add x0, x0, err_str_95 @PAGEOFF
+    mov x1, #20
+    b __strerror_exit
+
+__strerror_err_96:                      ; ENODATA
+
+    adrp x0, err_str_96 @PAGE
+    add x0, x0, err_str_96 @PAGEOFF
+    mov x1, #31
+    b __strerror_exit
+
+__strerror_err_97:                      ; ENOLINK
+
+    adrp x0, err_str_97 @PAGE
+    add x0, x0, err_str_97 @PAGEOFF
+    mov x1, #19
+    b __strerror_exit
+
+__strerror_err_98:                      ; ENOSR
+
+    adrp x0, err_str_98 @PAGE
+    add x0, x0, err_str_98 @PAGEOFF
+    mov x1, #20
+    b __strerror_exit
+
+__strerror_err_99:                      ; ENOSTR
+
+    adrp x0, err_str_99 @PAGE
+    add x0, x0, err_str_99 @PAGEOFF
+    mov x1, #14
+    b __strerror_exit
+
+__strerror_err_100:                     ; EPROTO
+
+    adrp x0, err_str_100 @PAGE
+    add x0, x0, err_str_100 @PAGEOFF
+    mov x1, #14
+    b __strerror_exit
+
+__strerror_err_101:                     ; ETIME
+
+    adrp x0, err_str_101 @PAGE
+    add x0, x0, err_str_101 @PAGEOFF
+    mov x1, #21
+    b __strerror_exit
+
+__strerror_err_102:                     ; EOPNOTSUPP
+
+    adrp x0, err_str_102 @PAGE
+    add x0, x0, err_str_102 @PAGEOFF
+    mov x1, #31
+    b __strerror_exit
+
+__strerror_err_103:                     ; ENOPOLICY
+
+    adrp x0, err_str_103 @PAGE
+    add x0, x0, err_str_103 @PAGEOFF
+    mov x1, #16
+    b __strerror_exit
+
+__strerror_err_104:                     ; ENOTRECOVERABLE
+
+    adrp x0, err_str_104 @PAGE
+    add x0, x0, err_str_104 @PAGEOFF
+    mov x1, #20
+    b __strerror_exit
+
+__strerror_err_105:                     ; EOWNERDEAD
+
+    adrp x0, err_str_105 @PAGE
+    add x0, x0, err_str_105 @PAGEOFF
+    mov x1, #19
+    b __strerror_exit
+
+__strerror_err_106:                     ; EQFULL
+
+    adrp x0, err_str_106 @PAGE
+    add x0, x0, err_str_106 @PAGEOFF
+    mov x1, #32
+    b __strerror_exit
+
+__strerror_err_107:                     ; ENOTCAPABLE
+
+    adrp x0, err_str_107 @PAGE
+    add x0, x0, err_str_107 @PAGEOFF
+    mov x1, #25
+    b __strerror_exit
+
+__strerror_err_unknown:                 ; unrecognized errors
 
     adrp x0, err_str_unknown @PAGE
     add x0, x0, err_str_unknown @PAGEOFF
-    mov x1, err_str_unknown_len
+    mov x1, #15
     b __strerror_exit
 
-__strerror_exit:                        ; exit
+__strerror_exit:
 
     ldp x29, x30, [sp], #16
     ret
@@ -1252,12 +2315,64 @@ __clear_buf_loop:
 
     strb w3, [x0], #1                   ; set every byte to 0b00000000 in a recursive loop
     subs x1, x1, #1
-    b.ne __clear_buf_loop_end
+    bne __clear_buf_loop_end
 
 __clear_buf_loop_end:
 
     ldp x29, x30, [sp], #16
     ret
+
+__perror:                               ; input: x0 -> error code, output: void
+
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
+    mov x5, x0
+    bl __strerror
+    mov x3, x0
+    mov x4, x1
+    
+    mov x0, #1
+    adrp x1, err_str_err_code @PAGE
+    add x1, x1, err_str_err_code @PAGEOFF
+    mov x2, err_str_err_code_len
+    mov x16, #4
+    svc #0x80
+
+    mov x0, x5
+    bl __num_to_ascii
+    mov x2, x0
+    mov x0, #1
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    mov x1, #':'
+    mov x2, #1
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    mov x1, #' '
+    mov x2, #1
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    mov x1, x3
+    mov x2, x4
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    mov x1, #'\n'
+    mov x2, #1
+    mov x16, #4
+    svc #0x80
+
+    ldp x29, x30, [sp], #16
+    ret
+
 
 ; __getcwd:                               ; get current working directory, (input: x0 -> dest str addr, output: x0 -> cwd str addr)
 ; 
@@ -1293,7 +2408,7 @@ __clear_buf_loop_end:
 
 .section  __DATA, __const                ; read only section
 
-; debug utilities
+; debug messages
 
     debug_checkpoint_str: .asciz "here\n" ; 6
     debug_checkpoint_str_len = . - debug_checkpoint_str
@@ -1302,63 +2417,153 @@ __clear_buf_loop_end:
     debug_open: .ascii "Attempting to open: "
     debug_open_len = . - debug_open
 
+    debug_fd_dir: .asciz "/dev/fd"
+
+    debug_print_fd: .asciz "\n[PID, FD opened]: "
+    debug_print_fd_len = . - debug_print_fd
+
+; debug commands & stuff
+
+    cmd_shell_path: .asciz "/bin/sh"
+    cmd_dash_c: .asciz "-c"
+    cmd_lsof_f: .asciz "lsof -p "
+    cmd_lsof_s: .asciz " > /Users/trangtran/Desktop/coding_files/assembly_shi/ARM-assembly-web-server/fds.txt"
+
+.align 5
+    cmd_lsof_argv:
+        .quad cmd_shell_path
+        .quad cmd_dash_c
+        .quad cmd_buffer
+        .quad 0
+
+.align 2
+    dirent_struct:
+        .quad 0     ; d_ino
+        .quad 0     ; d_seekoff
+        .short 0    ; d_reclen
+        .short 0    ; d_namlen
+        .space 1024 ; d_name
+
 ; error messages
-    err_str_eperm: .ascii "Operation not permitted: "
-    err_str_eperm_len = . - err_str_eperm
-    
-    err_str_enoent: .ascii "No such file or directory: "
-    err_str_enoent_len = . - err_str_enoent
-    
-    err_str_esrch: .ascii "No such process: "
-    err_str_esrch_len = . - err_str_esrch
-    
-    err_str_eintr: .ascii "Interrupted system call: "
-    err_str_eintr_len = . - err_str_eintr
-    
-    err_str_eio: .ascii "Input/output error: "
-    err_str_eio_len = . - err_str_eio
-    
-    err_str_enxio: .ascii "Device not configured: "
-    err_str_enxio_len = . - err_str_enxio
-    
-    err_str_ebadf: .ascii "Bad file descriptor: "
-    err_str_ebadf_len = . - err_str_ebadf
-    
-    err_str_eacces: .ascii "Permission denied: "
-    err_str_eacces_len = . - err_str_eacces
-    
-    err_str_efault: .ascii "Bad address: "
-    err_str_efault_len = . - err_str_efault
-    
-    err_str_eexist: .ascii "File exists: "
-    err_str_eexist_len = . - err_str_eexist
-    
-    err_str_enotdir: .ascii "Not a directory: "
-    err_str_enotdir_len = . - err_str_enotdir
-    
-    err_str_eisdir:.ascii "Is a directory: "
-    err_str_eisdir_len = . - err_str_eisdir
-    
-    err_str_einval: .ascii "Invalid argument: "
-    err_str_einval_len = . - err_str_einval
-    
-    err_str_emfile: .ascii "Too many open files: "
-    err_str_emfile_len = . - err_str_emfile
-    
-    err_str_enospc: .ascii "No space left on device: "
-    err_str_enospc_len = . - err_str_enospc
-    
-    err_str_erofs: .ascii "Read-only file system: "
-    err_str_erofs_len = . - err_str_erofs
-    
-    err_str_enametoolong: .ascii "File name too long: "
-    err_str_enametoolong_len = . - err_str_enametoolong
-    
+
+; messages for strerror(), supports errno = 1 - 35, 41 - 66
+; general errors
+    err_str_0: .ascii "Undefined error: 0"                               ; 0
+    err_str_1: .ascii "Operation not permitted"                          ; EPERM
+    err_str_2: .ascii "No such file or directory"                        ; ENOENT
+    err_str_3: .ascii "No such process"                                  ; ESRCH
+    err_str_4: .ascii "Interrupted system call"                          ; EINTR
+    err_str_5: .ascii "Input/output error"                               ; EIO
+    err_str_6: .ascii "Device not configured"                            ; ENXIO
+    err_str_7: .ascii "Argument list too long"                           ; E2BIG
+    err_str_8: .ascii "Exec format error"                                ; ENOEXEC
+    err_str_9: .ascii "Bad file descriptor"                              ; EBADF
+    err_str_10: .ascii "No child processes"                              ; ECHILD
+    err_str_11: .ascii "Resource deadlock avoided"                       ; EDEADLK
+    err_str_12: .ascii "Cannot allocate memory"                          ; ENOMEM
+    err_str_13: .ascii "Permission denied"                               ; EACCES
+    err_str_14: .ascii "Bad address"                                     ; EFAULT
+    err_str_15: .ascii "Block device required"                           ; ENOTBLK
+    err_str_16: .ascii "Resource busy"                                   ; EBUSY
+    err_str_17: .ascii "File exists"                                     ; EEXIST
+    err_str_18: .ascii "Cross-device link"                               ; EXDEV
+    err_str_19: .ascii "Operation not supported by device"               ; ENODEV
+    err_str_20: .ascii "Not a directory"                                 ; ENOTDIR
+    err_str_21: .ascii "Is a directory"                                  ; EISDIR
+    err_str_22: .ascii "Invalid argument"                                ; EINVAL
+    err_str_23: .ascii "Too many open files in system"                   ; ENFILE
+    err_str_24: .ascii "Too many open files"                             ; EMFILE
+    err_str_25: .ascii "Inappropriate ioctl for device"                  ; ENOTTY
+    err_str_26: .ascii "Text file busy"                                  ; ETXTBSY
+    err_str_27: .ascii "File too large"                                  ; EFBIG
+    err_str_28: .ascii "No space left on device"                         ; ENOSPC
+    err_str_29: .ascii "Illegal seek"                                    ; ESPIPE
+    err_str_30: .ascii "Read-only file system"                           ; EROFS
+    err_str_31: .ascii "Too many links"                                  ; EMLINK
+    err_str_32: .ascii "Broken pipe"                                     ; EPIPE
+    err_str_33: .ascii "Numerical argument out of domain"                ; EDOM
+    err_str_34: .ascii "Result too large"                                ; ERANGE
+    err_str_35: .ascii "Resource temporarily unavailable"                ; EAGAIN
+    err_str_36: .ascii "Operation now in progress"                       ; EINPROGRESS
+;
+    err_str_37: .ascii "Operation already in progress"                   ; EALREADY
+    err_str_38: .ascii "Socket operation on non-socket"                  ; ENOTSOCK
+    err_str_39: .ascii "Destination address required"                    ; EDESTADDRREQ
+    err_str_40: .ascii "Message too long"                                ; EMSGSIZE
+; protocol/socket errors
+    err_str_41: .ascii "Protocol wrong type for socket"                  ; EPROTOTYPE
+    err_str_42: .ascii "Protocol not available"                          ; ENOPROTOOPT
+    err_str_43: .ascii "Protocol not supported"                          ; EPROTONOSUPPORT
+    err_str_44: .ascii "Socket type not supported"                       ; ESOCKTNOSUPPORT
+    err_str_45: .ascii "Operation not supported"                         ; ENOTSUP
+    err_str_46: .ascii "Protocol family not supported"                   ; EPFNOSUPPORT
+    err_str_47: .ascii "Address family not supported by protocol family" ; EAFNOSUPPORT
+; networking errors
+    err_str_48: .ascii "Address already in use"                          ; EADDRINUSE
+    err_str_49: .ascii "Can't assign requested address"                  ; EADDRNOTAVAIL
+    err_str_50: .ascii "Network is down"                                 ; ENETDOWN
+    err_str_51: .ascii "Network is unreachable"                          ; ENETUNREACH
+    err_str_52: .ascii "Network dropped connection on reset"             ; ENETRESET
+    err_str_53: .ascii "Software caused connection abort"                ; ECONNABORTED
+    err_str_54: .ascii "Connection reset by peer"                        ; ECONNRESET
+    err_str_55: .ascii "No buffer space available"                       ; ENOBUFS
+    err_str_56: .ascii "Socket is already connected"                     ; EISCONN
+    err_str_57: .ascii "Socket is not connected"                         ; ENOTCONN
+    err_str_58: .ascii "Can't send after socket shutdown"                ; ESHUTDOWN
+    err_str_59: .ascii "Too many references: can't splice"               ; ETOOMANYREFS
+    err_str_60: .ascii "Operation timed out"                             ; ETIMEDOUT
+    err_str_61: .ascii "Connection refused"                              ; ECONNREFUSED
+    err_str_62: .ascii "Too many levels of symbolic links"               ; ELOOP
+    err_str_63: .ascii "File name too long"                              ; ENAMETOOLONG
+    err_str_64: .ascii "Host is down"                                    ; EHOSTDOWN
+    err_str_65: .ascii "No route to host"                                ; EHOSTUNREACH
+; others
+    err_str_66: .ascii "Directory not empty"                             ; ENOTEMPTY
+    err_str_67: .ascii "Too many processes"                              ; EPROCLIM
+    err_str_68: .ascii "Too many users"                                  ; EUSERS
+    err_str_69: .ascii "Disc quota exceeded"                             ; EDQUOT
+    err_str_70: .ascii "Stale NFS file handle"                           ; ESTALE
+    err_str_71: .ascii "Too many levels of remote in path"               ; EREMOTE
+    err_str_72: .ascii "RPC struct is bad"                               ; EBADRPC
+    err_str_73: .ascii "RPC version wrong"                               ; ERPCMISMATCH
+    err_str_74: .ascii "RPC prog. not avail"                             ; EPROGUNAVAIL
+    err_str_75: .ascii "Program version wrong"                           ; EPROGMISMATCH
+    err_str_76: .ascii "Bad procedure for program"                       ; EPROCUNAVAIL
+    err_str_77: .ascii "No locks available"                              ; ENOLCK
+    err_str_78: .ascii "Function not implemented"                        ; ENOSYS
+    err_str_79: .ascii "Inappropriate file type or format"               ; EFTYPE
+    err_str_80: .ascii "Authentication error"                            ; EAUTH
+    err_str_81: .ascii "Need authenticator"                              ; ENEEDAUTH
+    err_str_82: .ascii "Device power is off"                             ; EPWROFF
+    err_str_83: .ascii "Device error"                                    ; EDEVERR
+    err_str_84: .ascii "Value too large to be stored in data type"       ; EOVERFLOW
+    err_str_85: .ascii "Bad executable (or shared library)"              ; EBADEXEC
+    err_str_86: .ascii "Bad CPU type in executable"                      ; EBADARCH
+    err_str_87: .ascii "Shared library version mismatch"                 ; ESHLIBVERS
+    err_str_88: .ascii "Malformed Mach-o file"                           ; EBADMACHO
+    err_str_89: .ascii "Operation canceled"                              ; ECANCELED
+    err_str_90: .ascii "Identifier removed"                              ; EIDRM
+    err_str_91: .ascii "No message of desired type"                      ; ENOMSG
+    err_str_92: .ascii "Illegal byte sequence"                           ; EILSEQ
+    err_str_93: .ascii "Attribute not found"                             ; ENOATTR
+    err_str_94: .ascii "Bad message"                                     ; EBADMSG
+    err_str_95: .ascii "EMULTIHOP (Reserved)"                            ; EMULTIHOP
+    err_str_96: .ascii "No message available on STREAM"                  ; ENODATA
+    err_str_97: .ascii "ENOLINK (Reserved)"                              ; ENOLINK
+    err_str_98: .ascii "No STREAM resources"                             ; ENOSR
+    err_str_99: .ascii "Not a STREAM"                                    ; ENOSTR
+    err_str_100: .ascii "Protocol error"                                 ; EPROTO
+    err_str_101: .ascii "STREAM ioctl timeout"                           ; ETIME
+    err_str_102: .ascii "Operation not supported on socket"              ; EOPNOTSUPP
+    err_str_103: .ascii "Policy not found"                               ; ENOPOLICY
+    err_str_104: .ascii "State not recoverable"                          ; ENOTRECOVERABLE
+    err_str_105: .ascii "Previous owner died"                            ; EOWNERDEAD
+    err_str_106: .ascii "Interface output queue is full"                 ; EQFULL
+    err_str_107: .ascii "Capabilities insufficient"                      ; ENOTCAPABLE
     err_str_unknown: .ascii "Unknown error: "
-    err_str_unknown_len = . - err_str_unknown
     
     ; assume err code is smaller than 0 and negated to become positive
-    err_str_err_code: .ascii "\nError code: -"
+    err_str_err_code: .ascii "Error code: -"
     err_str_err_code_len = . - err_str_err_code
 
     fail_file_open: .ascii "Failed to open file " ; 20
@@ -1394,8 +2599,9 @@ __clear_buf_loop_end:
 
 .align 2
     addrlen: .word 16
-.align 0
+
     port: .byte 80
+
 .align 2
     backlog: .word 16384
 
@@ -1418,21 +2624,23 @@ __clear_buf_loop_end:
     msg_show_proc_num: .ascii "\nProcess ID (for debugging purposes): "
     msg_show_proc_num_len = . - msg_show_proc_num
 
+    msg_show_file_contents: .ascii "File contents of file "
+    msg_show_file_contents_len = . - msg_show_file_contents
+
+
 .section __DATA, __bss                  ; auto zeroed at startup
 
 ; buffers
-.align 14
-    incoming_buffer: .space 30720       ; incoming connections buffer
-.align 4
+    incoming_buffer: .space 30721       ; incoming connections buffer
     file_contents: .space 30000         ; html file content buffer
-.align 3
     stat_struct: .space 200             ; file stat buffer, for file size
-.align 4
     send_buffer: .space 30000           ; outgoing response buffer
-.align 11
     general_buffer: .space 2048         ; general buffer for functions
-.align 5
     nta_buffer: .space 32               ; __num_to_ascii's buffer
+
+; for debugging purposes
+    cmd_buffer: .space 256              ; for concatenating strings for a command
+    get_fd_buffer: .space 4096          ; for retrieving fds from /dev/fd
 
 
 .section  __TEXT, __cstring             ; null terminated strings & read only strings here
@@ -1450,7 +2658,8 @@ __clear_buf_loop_end:
     fail_in_socket: .asciz "In sockets\n"
     fail_in_bind: .asciz "In bind\n"
     fail_in_listen: .asciz "In listen\n"
-    fail_create_socket: .asciz "Failed to create client socket.\n"
+    fail_create_socket: .asciz "Failed to create client socket.\nError code: "
+    fail_create_socket_len = . - fail_create_socket
     
     send_success: .asciz "Successfully transmitted data to client.\n"
     send_no_data_to_client: .asciz "The client requested no data or a general read and write error encountered.\n"
@@ -1458,14 +2667,5 @@ __clear_buf_loop_end:
     filename: .asciz "/Users/trangtran/Desktop/coding_files/assembly_shi/ARM-assembly-web-server/template.html"
     filename_len = . - filename
 
-; debugging purposes
-
-    cmd_shell_path: .asciz "/bin/sh"
-    cmd_dash_c: .asciz "-c"
-    cmd_lsof: .asciz "lsof -p $PPID > /Users/trangtran/Desktop/coding_files/assembly_shi/ARM-assembly-web-server/fds.txt"
-.align 3
-    cmd_lsof_argv:
-        .quad cmd_shell_path
-        .quad cmd_dash_c
-        .quad cmd_lsof
-        .quad 0
+    str_one_dot: .asciz "."
+    str_two_dot: .asciz ".."
