@@ -1,36 +1,28 @@
-; clang -o server server.s && ./server
 
-; ARMv8.6-A AArch64
+; Register organization:
 
-; register structure (for organization & avoid register corruption):
+; x0 - x7           Function I/O
+; x8                Syscall/Indirect Result
+; x9 - x15          Scratch
+; x16               Syscall
+; x17               Temp register for compilers/linkers
+; x18               Platform
 
-;   x0 - x7         arguments & scratch if needed
-;   x8              indirect result location
-;   x9 - x15        (scratch/temporary, assume overwritten every syscall)
-;   x16             syscall
-;   x17             link register
-;   x18             platform register
-
-;   x19             server fd            
-;   x20             client socket fd
-;   x21             file fd
-;   x22             send buffer
-;   x23             incoming buffer
-;   x24             file contents
-;   x25             (scratch/temporary)
-;   x26             (scratch/temporary)
-;   x27             (scratch/temporary)
-;   x28             (scratch/temporary)
-
-
-; commented out code are either broken code, temporary code (but do not remove), or debugging checkpoints.
-
+; x19               Server file descriptor
+; x20               Client file descriptor
+; x21               Bytes read for read() from client connections
+; x22               (TBD)
+; x23               (TBD)
+; x24               (TBD)
+; x25 - x28         Scratch
+; x29               Stack/Frame pointer
+; x30               Link register/Return address
 
 .global _main
 .align 2
 
 _main:
-    ; allocate 96 bytes on the stack for registers x19-x28
+
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
     stp x23, x24, [sp, #-16]!
@@ -39,164 +31,22 @@ _main:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
 
-    mov x16, #20
-    svc #0x80
-
-    mov x25, x0
-
-    mov x0, #1
-    adrp x1, msg_show_proc_num @PAGE
-    add x1, x1, msg_show_proc_num @PAGEOFF
-    mov x2, msg_show_proc_num_len
-    mov x16, #4
-    svc #0x80
-
-    mov x0, x25
-    bl __num_to_ascii
-    mov x2, x0
-    mov x0, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    adrp x1, str_newline @PAGE
-    add x1, x1, str_newline @PAGEOFF
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    adrp x26, process_id @PAGE
-    add x26, x26, process_id @PAGEOFF
-    str w25, [x26]
-
-    ; socket()
-    mov x0, #2                          ; AF_INET (IPv4)
-    mov x1, #1                          ; SOCK_STREAM
-    mov x2, #0                          ; 0 = default protocol
-    mov x16, #97                        ; socket syscall: 97
-    svc #0x80
-
-    cmp x0, #0
-    bne _main_socket_fail_branch_end
-
-_main_socket_fail_branch:               ; socket() < 0
-
-    mov x0, #1
-    adrp x1, fail_in_socket @PAGE
-    add x1, x1, fail_in_socket @PAGEOFF
-    mov x2, #12
-    mov x16, #4
-    svc #0x80
-
-    b _main_program_exit_bad
-
-_main_socket_fail_branch_end:
-
-    mov x25, x0
-
-    mov x0, #1
-    adrp x1, msg_show_server_fd @PAGE
-    add x1, x1, msg_show_server_fd @PAGEOFF
-    mov x2, msg_show_server_fd_len
-    mov x16, #4
-    svc #0x80
-
-    mov x0, x25
-    bl __num_to_ascii
-    mov x2, x0
-    mov x0, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    adrp x1, str_newline @PAGE
-    add x1, x1, str_newline @PAGEOFF
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, x25
-
-    adrp x19, server_fd @PAGE
-    add x19, x19, server_fd @PAGEOFF
-    str w0, [x19]                       ; store value of server's file descriptor to &server_fd
-
-    adrp x6, address @PAGE
-    add x6, x6, address @PAGEOFF
-    ldrh w0, [x6, #2]                    ; htons( PORT )
-    bl __htons_16
-    strh w0, [x6, #2]
-
-    ; bind()
-    mov x0, x25                         ; socket_fd
-    adrp x1, address @PAGE              ; & struct sock_addr
-    add x1, x1, address @PAGEOFF
-    adrp x7, addrlen @PAGE
-    add x7, x7, addrlen @PAGEOFF
-    ldr w2, [x7]                        ; sizeof(struct sock_addr)
-    mov x16, #104                     ; bind syscall: 104
-    svc #0x80
-
-    cmp x0, #0
-    bge _main_bind_fail_branch_end
-
-_main_bind_fail_branch:                 ; bind() < 0
-
-    mov x0, #1
-    adrp x1, fail_in_bind @PAGE
-    add x1, x1, fail_in_bind @PAGEOFF
-    mov x2, #8
-    mov x16, #4
-    svc #0x80
-
-    b _main_program_exit_bad
-
-_main_bind_fail_branch_end:
-
-    ; listen()
-    ldr w0, [x19]                       ; server file descriptor
-    adrp x27, backlog @PAGE
-    add x27, x27, backlog @PAGEOFF
-    ldr w1, [x27]                       ; backlog count
-    mov x16, #106                     ; listen syscall: 106
-    svc #0x80
-
-    cmp x0, #0
-    bge _main_listen_fail_branch_end
-
-_main_listen_fail_branch:               ; listen() < 0
-
-    mov x0, #1
-    adrp x1, fail_in_listen @PAGE
-    add x1, x1, fail_in_listen @PAGEOFF
-    mov x2, 11
-    mov x16, #4
-    svc #0x80
-
-    b _main_program_exit_bad
-
-_main_listen_fail_branch_end:
-
-    ; open()
-    adrp x0, filename @PAGE             ; addr
+    adrp x0, filename @PAGE
     add x0, x0, filename @PAGEOFF
-    mov x1, #0                          ; O_RDONLY: open file as read only
-    mov x2, #0                          ; permission
-    mov x16, #5                         ; open syscall: 5
+    mov x1, #0
+    mov x2, #0
+    mov x16, #5
     svc #0x80
 
-    mov x21, x0                         ; save file fd
-    ; if open() return 0, 1, 2, that's unusual (corresponds to stdout, stdin, stderr)
-    
     cmp x0, #0
-    bgt _main_file_open_fail_end
+    bge _main_open_file_fail_end
 
-_main_file_open_fail:                   ; open() < 0
+_main_open_file_fail:
 
-    bl __strerror
-    mov x2, x1
-    mov x1, x0
     mov x0, #1
+    adrp x1, fail_load_file @PAGE
+    add x1, x1, fail_load_file @PAGEOFF
+    mov x2, fail_load_file_len
     mov x16, #4
     svc #0x80
 
@@ -208,1030 +58,691 @@ _main_file_open_fail:                   ; open() < 0
     svc #0x80
 
     mov x0, #1
-    mov x1, #'\n'
+    adrp x1, p_newline @PAGE
+    add x1, x1, p_newline @PAGEOFF
     mov x2, #1
     mov x16, #4
     svc #0x80
 
     mov x0, #1
-    mov x1, #'\0'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
+    b _main_exit
 
-    mov x0, #1
-    adrp x1, err_str_err_code @PAGE
-    add x1, x1, err_str_err_code @PAGEOFF
-    mov x2, err_str_err_code_len
-    mov x16, #4
-    svc #0x80
-
-    mov x0, x21
-    bl __num_to_ascii
-
-    mov x2, x0
-    mov x0, #1
-    ; addr already in x1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #'\n'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #'\0'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    b _main_program_exit_bad
-
-_main_file_open_fail_end:
-
-    mov x0, #1
-    adrp x1, filename @PAGE
-    add x1, x1, filename @PAGEOFF
-    mov x2, filename_len
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    adrp x1, msg_show_file_fd @PAGE
-    add x1, x1, msg_show_file_fd @PAGEOFF
-    mov x2, msg_show_file_fd_len
-    mov x16, #4
-    svc #0x80
-
-    mov x0, x21
-    bl __num_to_ascii
-    mov x2, x0
-    mov x0, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    adrp x1, str_newline @PAGE
-    add x1, x1, str_newline @PAGEOFF
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
+_main_open_file_fail_end:
 
     ; fstat()
-    mov x0, x21
-    adrp x1, stat_struct @PAGE            ; & struct stat
+    mov x21, x0
+    adrp x1, stat_struct @PAGE
     add x1, x1, stat_struct @PAGEOFF
-    mov x16, #189                       ; fstat systall: 189
+    mov x16, #189
     svc #0x80
 
     cmp x0, #0
-    beq _main_get_file_info_end
+    beq _main_get_file_info_fail_end
 
-_main_get_file_info_fail:               ; fstat() < 0
+_main_get_file_info_fail:
 
-    mov x0, #0
+    mov x0, #1
     adrp x1, fail_get_file_info @PAGE
     add x1, x1, fail_get_file_info @PAGEOFF
-    mov x2, #42
+    mov x2, fail_get_file_info_len
     mov x16, #4
     svc #0x80
 
     mov x0, #1
-    adrp x1, filename @PAGE
-    add x1, x1, filename @PAGEOFF
-    mov x2, filename_len
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #'\n'
+    adrp x1, p_newline @PAGE
+    add x1, x1, p_newline @PAGEOFF
     mov x2, #1
     mov x16, #4
     svc #0x80
 
     mov x0, #1
-    mov x1, #'\0'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
+    b _main_exit
 
-    b _main_program_exit_bad
-
-_main_get_file_info_end:
+_main_get_file_info_fail_end:
 
     adrp x28, stat_struct @PAGE
     add x28, x28, stat_struct @PAGEOFF
-/*  debugging: printing stat_struct contents
-    mov x20, #0                          ; byte index counter
-__loop:
-    cmp x20, #144
-    bge _main_program_exit_good
-
-    mov x0, x20
-    bl __num_to_ascii
-    mov x2, x0
-    mov x0, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    adrp x1, str_newline @PAGE
-    add x1, x1, str_newline @PAGEOFF
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    ldrb w0, [x28, x20]
-    bl __num_to_ascii
-    mov x2, x0
-    mov x0, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    adrp x1, str_newline @PAGE
-    add x1, x1, str_newline @PAGEOFF
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    add x20, x20, #1
-    b __loop
-
-__loop_e:
-    b _main_program_exit_good*/
-
-    ldr x0, [x28, #72]                   ; struct stat::st_size, (macOS 13+): st_size is offset 72 instead of 96.
-
-    ; bl __num_to_ascii
-    ; mov x2, x0
-    ; mov x0, #1
-    ; mov x16, #4
-    ; svc #0x80
-    ; b _main_program_exit_good
-
+    ldr x0, [x28, #72]
     cmp x0, #0
     bgt _main_file_empty_end
 
-_main_file_empty:                       ; st_size <= 0
+_main_file_empty:
 
-    mov x0, #0
-    adrp x1, fail_file_read_size @PAGE
-    add x1, x1, fail_file_read_size @PAGEOFF
-    mov x2, fail_file_read_size_len
+    mov x0, #1
+    adrp x1, fail_file_empty @PAGE
+    add x1, x1, fail_file_empty @PAGEOFF
+    mov x2, fail_file_empty_len
     mov x16, #4
     svc #0x80
 
     mov x0, #1
-    adrp x1, filename @PAGE
-    add x1, x1, filename @PAGEOFF
-    mov x2, filename_len
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #'\n'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #'\0'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    b _main_program_exit_bad
+    b _main_exit
 
 _main_file_empty_end:
 
-    ; read()
-    mov x0, x21                         ; retrieve file fd
-    adrp x1, file_contents @PAGE        ; buffer to write to
-    add x1, x1, file_contents @PAGEOFF
-    adrp x28, stat_struct @PAGE
-    add x28, x28, stat_struct @PAGEOFF
-    ldr x2, [x28, #72]                   ; only read for a certain file size
-    mov x16, #3                         ; read syscall: 3
+    mov x0, x21
+    adrp x1, file_contents_buffer @PAGE
+    add x1, x1, file_contents_buffer @PAGEOFF
+    ldr x2, [x28, #72]
+    mov x16, #3
     svc #0x80
 
     cmp x0, #0
-    blt _main_file_read_error
-    bge _main_file_read_error_end
+    bgt _main_file_read_error_end
 
-_main_file_read_error:                  ; read() < 0
+_main_file_read_error:
 
-    mov x0, #0
-    adrp x1, fail_file_read @PAGE
-    add x1, x1, fail_file_read @PAGEOFF
-    mov x2, fail_file_read_len
+    mov x0, #1
+    adrp x1, fail_read_file @PAGE
+    add x1, x1, fail_read_file @PAGEOFF
+    mov x2, fail_read_file_len
     mov x16, #4
     svc #0x80
 
     mov x0, #1
-    adrp x1, filename @PAGE
-    add x1, x1, filename @PAGEOFF
-    mov x2, filename_len
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #'\n'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #'\0'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    b _main_program_exit_bad
+    b _main_exit
 
 _main_file_read_error_end:
 
-    adrp x1, file_contents_len @PAGE
-    add x1, x1, file_contents_len @PAGEOFF
-    strh w0, [x1]
-
-    ; print file contents for debugging purposes.
-    mov x0, #1
-    adrp x1, msg_show_file_contents @PAGE
-    add x1, x1, msg_show_file_contents @PAGEOFF
-    mov x2, msg_show_file_contents_len
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    adrp x1, filename @PAGE
-    add x1, x1, filename @PAGEOFF
-    mov x2, filename_len
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #':'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #' '
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    adrp x1, file_contents @PAGE
-    add x1, x1, file_contents @PAGEOFF
-    adrp x3, file_contents_len @PAGE
-    add x3, x3, file_contents_len @PAGEOFf
-    ldrh w2, [x3]
-    mov x16, #4
-    svc #0x80
-
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #'\n'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    adrp x22, send_buffer @PAGE
-    add x22, x22, send_buffer @PAGEOFF
-
-    adrp x23, incoming_buffer @PAGE
-    add x23, x23, incoming_buffer @PAGEOFF
-
-    adrp x24, file_contents @PAGE
-    add x24, x24, file_contents @PAGEOFF
-
-    ; close(); close() < 0 -> shutdown
-    mov x0, x21                         ; file fd
-    mov x16, #6
-    svc #0x80
-
-    cmp x0, #0
-    beq _main_file_fd_close_error_end
-
-_main_file_fd_close_error:
-
-    b _main_program_exit_bad
-
-_main_file_fd_close_error_end:
-
-    mov x21, #0
-
-    ; checkpoint before the main loop, prints the file contents buffer, can disable/remove in the future.
-    ; mov x0, #1
-    ; adrp x1, file_contents @PAGE
-    ; add x1, x1, file_contents @PAGEOFF
-    ; mov x16, #4
-    ; svc #0x80
-
-    ; mov x0, #1
-    ; adrp x1, str_newline @PAGE
-    ; add x1, x1, str_newline @PAGEOFF
-    ; mov x2, #1
-    ; mov x16, #4
-    ; svc #0x80
-
-    mov x0, #1
-    adrp x1, file_contents @PAGE
-    add x1, x1, file_contents @PAGEOFF
+    ; save file length
+    adrp x2, file_contents_len @PAGE
+    add x2, x2, file_contents_len @PAGEOFF
+    str w0, [x2]
     
-
-    ; b _main_program_exit_good
-
-_main_main_server_loop:
+    mov x2, x0
+    mov x25, x0
 
     mov x0, #1
-    adrp x1, msg_waiting_conn @PAGE
-    add x1, x1, msg_waiting_conn @PAGEOFF
-    mov x2, #33
+    adrp x1, file_contents_buffer @PAGE
+    add x1, x1, file_contents_buffer @PAGEOFF
+    
+    ; TEMPORARY
     mov x16, #4
     svc #0x80
 
-    ; accept()
-    ldr w0, [x19]                       ; server fd
-    adrp x1, address @PAGE
-    add x1, x1, address @PAGEOFF        ; addr to write to
-    adrp x2, addrlen @PAGE
-    add x2, x2, addrlen @PAGEOFF        ; sizeof(struct sock_addr)
-    mov x16, #30                        ; accept syscall: 30
+    ; TEMPORARY
+    mov x0, x25
+    bl __num_to_ascii
+    mov x2, x0
+    mov x0, #1
+    mov x16, #4
     svc #0x80
 
-    adrp x20, client_fd @PAGE
-    add x20, x20, client_fd @PAGEOFF
-    str w0, [x20]
+    ; TEMPORARY
+    mov x0, #0
+    b _main_exit
 
-    cmp w0, #0
-    bge _main_accept_create_socket_fail_branch_end
+    ; socket()
+    mov x0, #2
+    mov x1, #1
+    mov x2, #0
+    mov x16, #97
+    svc #0x80
 
-_main_accept_create_socket_fail_branch: ; accept() < 0
+    cmp x0, #3
+    bge _main_create_socket_fail_branch_end
 
-    mov x25, x0
+_main_create_socket_fail_branch:
 
     mov x0, #1
     adrp x1, fail_create_socket @PAGE
     add x1, x1, fail_create_socket @PAGEOFF
-    mov x2, #33
-    mov x16, #4
-    svc #0x80
-
-    mov x0, x25
-    bl __num_to_ascii
-    mov x2, x0
-    mov x0, #1
+    mov x2, fail_create_socket_len
     mov x16, #4
     svc #0x80
 
     mov x0, #1
-    mov x1, #':'
+    b _main_exit
+
+_main_create_socket_fail_branch_end:
+
+    mov x19, x0                         ; server fd
+
+    adrp x1, server_fd @PAGE
+    add x1, x1, server_fd @PAGEOFF
+    str w0, [x1]
+
+    ; bind()
+    mov x0, x19
+    adrp x1, address @PAGE
+    add x1, x1, address @PAGEOFF
+    mov x2, #16
+    mov x16, #104
+    svc #0x80
+
+    cmp x0, #0
+    beq _main_bind_socket_fail_branch_end
+
+_main_bind_socket_fail_branch:
+
+    mov x0, #1
+    adrp x1, fail_bind_socket @PAGE
+    add x1, x1, fail_bind_socket @PAGEOFF
+    mov x2, fail_bind_socket_len
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    b _main_exit
+
+_main_bind_socket_fail_branch_end:
+
+    ; listen()
+    mov x0, x19
+    mov x1, #16384
+    mov x16, #106
+    svc #0x80
+
+    cmp x0, #0
+    bge _main_listen_socket_fail_branch_end
+
+_main_listen_socket_fail_branch:
+
+    mov x0, #1
+    adrp x1, fail_listen_socket @PAGE
+    add x1, x1, fail_listen_socket @PAGEOFF
+    mov x2, fail_listen_socket_len
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    b _main_exit
+
+_main_listen_socket_fail_branch_end:
+
+; configuring socket options, for now failures can be discarded
+
+    ; SO_REUSEADDR | SO_REUSEPORT
+    mov x0, x19
+    mov x1, #0xFFFF
+    mov x2, #0x0204
+    adrp x3, opt @PAGE
+    add x3, x3, opt @PAGEOFF
+    mov x4, #4
+    mov x16, #105
+    svc #0x80
+
+    ; SO_RCVBUF
+    mov x0, x19
+    mov x1, #0xFFFF
+    mov x2, #0x1002
+    mov x3, #30721
+    mov x4, #8
+    mov x16, #105
+    svc #0x80
+
+    ; SO_SNDBUF
+    mov x0, x19
+    mov x1, #0xFFFF
+    mov x2, #0x1001
+    mov x3, #30721
+    mov x4, #8
+    mov x16, #105
+    svc #0x80
+
+    ; TCP_FASTOPEN
+    mov x0, x19
+    mov x1, #6                          ; IPPROTO_TCP
+    mov x2, #0x105
+    adrp x3, opt @PAGE
+    add x3, x3, opt @PAGEOFF
+    mov x4, #4
+    mov x16, #105
+    svc #0x80
+
+    ; SO_NOSIGPIPE
+    mov x0, x19
+    mov x1, #0xFFFF
+    mov x2, #0x1022
+    adrp x3, opt @PAGE
+    add x3, x3, opt @PAGEOFF
+    mov x4, #4
+    mov x16, #105
+    svc #0x80
+
+    ; fcntl() -> F_GETFL
+    mov x0, x19
+    mov x1, #3                          ; F_GETFL
+    mov x2, #0
+    mov x16, #92
+    svc #0x80
+    mov x5, x0
+    orr x5, x5, #0x4                      ; flags | O_NONBLOCK
+
+    ; O_NONBLOCK
+    mov x0, x19
+    mov x1, #4                          ; F_SETFL
+    mov x2, x5
+    mov x16, #92
+    svc #0x80
+
+    ; kqueue()
+    mov x16, #362
+    svc #0x80
+
+    cmp x0, #0
+    bge _main_kqueue_fail_branch_end
+    
+_main_kqueue_fail_branch:
+
+    mov x0, #1
+    adrp x1, fail_kqueue_fd @PAGE
+    add x1, x1, fail_kqueue_fd @PAGEOFF
+    mov x2, fail_kqueue_fd_len
+    mov x16, #4
+    svc #0x80
+
+    mov x0, #1
+    b _main_exit
+
+_main_kqueue_fail_branch_end:
+
+    mov x19, x0
+
+    adrp x1, kqueue_fd @PAGE
+    add x1, x1, kqueue_fd @PAGEOFF
+    str w0, [x1]
+
+    mov x25, #0
+
+_main_create_threads_loop:
+
+    ; space per thread:
+    ; sizeof kevent[10] + sizeof connection_state[10] + 4096 extra bytes stack space
+
+    ; adrp x26, ajkljd @PAGE
+    ; add x26, x26, ajkljd @PAGEOFF
+    ; ldr x25, [x26]
+    mov x25, #0x2000
+
+    ; mmap()
+    mov x0, #0                          ; default thread attributes
+    mov x1, x25                         ; space per threads, ~311 KB
+    mov x2, #0x3                        ; PROT_READ | PROT_WRITE
+    mov x3, #0x1002                     ; MAP_PRIVATE | MAP_ANON
+    mov x4, #-1
+    mov x5, #0
+    mov x16, #197
+    svc #0x80
+
+    add x0, x0, x25                     ; points pointer to top of memory block
+
+    ; check if mmap() < 0 -> error, crash
+
+    ; pointer to mmap() is already return in x0
+    adrp x1, _worker @PAGE
+    add x1, x1, _worker @PAGEOFF
+    mov x2, x19                         ; kqueue_fd
+    mov x3, x0                          ; pointer to mem area
+    mov x4, #0                          ; NULL = pthread_t
+    mov x5, #0                          ; flags
+    mov x16, #360
+    svc #0x80
+
+    add x25, x25, #1
+    cmp x25, #8
+    blt _main_create_threads_loop
+
+_main_create_threads_loop_end:
+
+    ; fall-through to loop
+
+_main_accept_loop:
+
+    ; accept()
+    adrp x25, server_fd @PAGE
+    add x25, x25, server_fd @PAGEOFF
+    ldr w0, [x25]
+    adrp x1, address @PAGE
+    add x1, x1, address @PAGEOFF
+    adrp x2, addrlen @PAGE
+    add x2, x2, addrlen @PAGEOFF
+    mov x16, #30
+
+    ; check accept() errors
+    
+    mov x20, x0
+
+    ; check if client_fd exceeds 65535, int16 overflow if does
+
+    ; malloc() a pointer to connection_state, store client_fd/zeroes out fields, and call kevent.
+
+    mov x26, sp
+    sub sp, sp, #256                    ; alloc kevent
+
+    ; EV_SET()
+    str x20, [x26]                      ; client_fd
+    mov x27, #-1                        ; EVFILT_READ
+    strh w27, [x26, #8]
+    mov x27, #0x11                      ; EV_ADD | EV_ONESHOT
+    strh w27, [x26, #10]
+    str wzr, [x26, #12]
+    str xzr, [x26, #16]
+    
+    str [connection_state], [x26, #24]
+
+    ; kevent()
+    adrp x26, kqueue_fd @PAGE
+    add x26, x26, kqueue_fd @PAGEOFF
+    ldr w0, [x26]                       ; kqueue_fd
+    add x1, sp, #256                    ; &change
     mov x2, #1
-    mov x16, #4
+    mov x3, #0
+    mov x4, #0
+    mov x5, #0
+    mov x16, #363
     svc #0x80
 
-    mov x0, #1
-    mov x1, #' '
-    mov x2, #1
-    svc #0x80
+    ; check return value + err code
 
-    mov x0, x25
-    bl __strerror
-    mov x2, x1
-    mov x1, x0
-    mov x0, #1
-    mov x16, #4
-    svc #0x80
-
-    ; purposely crash for now
-    b _main_program_exit_bad
-
-    ; b _main_main_server_loop
-
-_main_accept_create_socket_fail_branch_end:
-    ; mov x25, x0
-
-    mov x0, #1
-    adrp x1, msg_accept_conn @PAGE
-    add x1, x1, msg_accept_conn @PAGEOFF
-    mov x2, msg_accept_conn_len
-    mov x16, #4
-    svc #0x80
-
-    ; debugging
-    mov x0, #1
-    adrp x1, msg_show_client_fd @PAGE
-    add x1, x1, msg_show_client_fd @PAGEOFF
-    mov x2, msg_show_client_fd_len
-    mov x16, #4
-    svc #0x80
-
-    ; debugging
-    ldr w0, [x20]
-    bl __num_to_ascii
-    mov x2, x0
-    mov x0, #1
-    mov x16, #4
-    svc #0x80
-
-    ; debugging
-    mov x0, #1
-    adrp x1, str_newline @PAGE
-    add x1, x1, str_newline @PAGEOFF
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
+    b _main_accept_loop
 
 /*
-; check open fds for this process
-    adrp x0, debug_fd_dir @PAGE
-    add x0, x0, debug_fd_dir @PAGEOFF
-    mov x1, #0
-    mov x16, #5
-    svc #0x80
+    struct kevent {
+8       uintptr_t       ident;     identifier for this event
+2       int16_t         filter;    filter for event
+2       uint16_t        flags;     general flags
+4       uint32_t        fflags;    filter-specific flags
+8       intptr_t        data;      filter-specific data
+8       void            *udata;    opaque user data identifier
+    };*/
+
+_main_exit:                             ; store exit code in x0 already
 
-    mov x6, x0                          ; save fd
-    cmp x0, #0
-    bgt _main_check_fd_fail_end
-
-_main_check_fd_fail:
-
-    bl __perror
-    b _main_program_exit_bad
-
-_main_check_fd_fail_end:
-
-    mov x7, #0                          ; curr pos in dir
-
-_main_check_fd_loop:
-
-    ; fd already in x0
-    adrp x1, get_fd_buffer @PAGE
-    add x1, x1, get_fd_buffer @PAGEOFF
-    mov x2, #4096
-    mov x3, x7
-    mov x16, #344
-    svc #0x80
-
-    cmp x0, #0
-    ble _main_check_fd_loop_end
-
-    mov x28, x0
-
-    mov x5, #0                          ; offset
-
-_main_check_fd_inner_loop:
-
-    cmp x5, x28
-    blt _main_check_fd_inner_loop_end
-
-    adrp x0, get_fd_buffer @PAGE
-    add x0, x0, get_fd_buffer @PAGEOFF
-    add x0, x0, x5
-
-    add x0, x0, #160
-    adrp x1, str_one_dot @PAGE
-    add x1, x1, str_one_dot @PAGEOFF
-    bl __strcmp
-
-    mov x25, x2
-
-    adrp x1, str_two_dot @PAGE
-    add x1, x1, str_two_dot @PAGEOFF
-    bl __strcmp
-
-    mov x26, x2
-
-    orr x0, x25, x26                    ; if both is non zero, then (x25 OR x26) must be non zero.
-    cmp x0, #0
-
-_main_check_fd_inner_loop_branch:
-
-    adrp x1, get_fd_buffer @PAGE
-    add x1, x1, get_fd_buffer @PAGEOFF
-    ldrh w0, [x1, #20]
-    uxth x0, w0
-    bl __num_to_ascii
-    mov x25, x0
-    mov x26, x1
-
-    mov x0, #1
-    adrp x1, debug_print_fd @PAGE
-    add x1, x1, debug_print_fd @PAGEOFF
-    mov x2, debug_print_fd_len
-    mov x16, #4
-    svc #0x80
-
-    adrp x1, process_id @PAGE
-    add x1, x1, process_id @PAGEOFF
-    str w0, [x1]
-    bl __num_to_ascii
-
-    mov x2, x0
-    mov x0, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #','
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, x26
-    mov x2, x25
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #'\n'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-_main_check_fd_inner_loop_branch_end:
-
-    adrp x0, get_fd_buffer @PAGE
-    add x0, x0, get_fd_buffer @PAGEOFF
-    ldrh w2, [x0, #16]
-    add x5, x5, x2, uxtx #0
-
-    b _main_check_fd_inner_loop
-
-_main_check_fd_inner_loop_end:
-
-    b _main_check_fd_loop
-
-_main_check_fd_loop_end:
-
-    bl __strerror                         ; at least see what error it is
-    mov x2, x1
-    mov x1, x0
-    mov x0, #1
-    mov x16, #4
-    svc #0x80
-
-    b _main_program_exit_good
-*/
-
-    ; read()
-    adrp x20, client_fd @PAGE
-    add x20, x20, client_fd @PAGEOFF
-    ldr w0, [x20]                       ; client fd
-    adrp x1, incoming_buffer @PAGE
-    add x1, x1, incoming_buffer @PAGEOFF
-    mov x2, #30720                      ; max size to read, leave 1 for '\0'
-    mov x16, #3
-    svc #0x80
-
-    ; mov x2, x0
-    ; mov x0, #1
-    ; adrp x1, incoming_buffer @PAGE
-    ; add x1, x1, incoming_buffer @PAGEOFF
-    ; mov x16, #4
-    ; svc #0x80
-
-    ; check bytes read
-    cmp x0, #0
-    bgt _main_read_branch_success
-    beq _main_read_branch_disconnected
-    b _main_read_branch_err
-
-_main_read_branch_success:
-    ; read at the limit, likely an overflow
-    mov x15, #30719
-    cmp x0, x15
-    bge _main_read_branch_buf_overflow
-
-    adrp x27, valread @PAGE
-    add x27, x27, valread @PAGEOFF
-    str x0, [x27]
-
-    mov w14, #'\0'                      ; null terminate buffer
-    strb w14, [x23, x0]
-
-    mov x0, #1
-    adrp x1, read_success @PAGE
-    add x1, x1, read_success @PAGEOFF
-    mov x2, #42
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    adrp x1, incoming_buffer @PAGE
-    add x1, x1, incoming_buffer @PAGEOFF
-    mov x2, x12
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    adrp x1, msg_show_bytes_read @PAGE
-    add x1, x1, msg_show_bytes_read @PAGEOFF
-    mov x2, msg_show_bytes_read_len
-    mov x16, #4
-    svc #0x80
-
-    ldr x0, [x27]
-    bl __num_to_ascii
-    mov x2, x0
-    mov x0, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    adrp x1, str_newline @PAGE
-    add x1, x1, str_newline @PAGEOFF
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    b _main_read_branch_end
-
-_main_read_branch_disconnected:         ; read() == 0, no bytes sent
-
-    mov x0, #1
-    adrp x1, read_disconnected @PAGE
-    add x1, x1, read_disconnected @PAGEOFF
-    mov x2, #44
-    mov x16, #4
-    svc #0x80
-
-    mov x0, x20
-    bl __close_fd_64
-
-    b _main_main_server_loop
-
-_main_read_branch_buf_overflow:         ; read() == 30719 bytes, overflow or an attack, will cause crash if not handled
-
-    mov x0, #1
-    adrp x1, read_buffer_overflow @PAGE
-    add x1, x1, read_buffer_overflow @PAGEOFF
-    mov x2, #53
-    mov x16, #4
-    svc #0x80
-
-    mov x0, x20
-    bl __close_fd_64
-
-    b _main_main_server_loop
-
-_main_read_branch_err:                  ; read() < 0, error occured reading data
-
-    mov x0, #1
-    adrp x1, read_err_unknown @PAGE
-    add x1, x1, read_err_unknown @PAGEOFF
-    mov x2, #73
-    mov x16, #4
-    svc #0x80
-
-    mov x0, x20
-    bl __close_fd_64
-
-    b _main_main_server_loop
-
-_main_read_branch_end:
-
-    mov x0, x24
-    bl __strlen                         ; calculate file length & check for len == 0 -> err
-
-    cmp x0, #0
-    bge _main_file_contents_length_is_zero_end
-
-_main_file_contents_length_is_zero:     ; checks if template.html, or file_contents is empty
-
-    mov x0, #0
-    adrp x1, fail_file_empty @PAGE
-    add x1, x1, fail_file_empty @PAGEOFF
-    mov x2, #43
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    adrp x1, filename @PAGE
-    add x1, x1, filename @PAGEOFF
-    mov x2, filename_len
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #'\n'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #'\0'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    b _main_program_exit_bad
-
-_main_file_contents_length_is_zero_end:
-
-    ; building http response, store in send_buffer
-
-    ; strlen in x0
-
-    bl __num_to_ascii
-
-    mov x12, x1                                     ; Content-Length
-
-    mov x0, x22                                     ; http response buffer (send_buffer)
-
-    adrp x9,  http_header @PAGE                     ; HTTP Header
-    add  x9,  x9, http_header @PAGEOFF
-    adrp x10, http_content_type @PAGE               ; Content-Type
-    add  x10, x10, http_content_type @PAGEOFF
-    adrp x11, http_content_length @PAGE
-    add  x11, x11, http_content_length @PAGEOFF
-
-    adrp x13, http_content_security @PAGE
-    add  x13, x13, http_content_security @PAGEOFF   ; Connection, X-Content-Type-Options, X-Frame-Options, X-XSS-Protection
-    adrp x14, line_break @PAGE
-    add  x14, x14, line_break @PAGEOFF
-    adrp x15, file_contents @PAGE
-    add  x15, x15, file_contents @PAGEOFF
-
-    mov x1, x9
-    bl __strcat
-    mov x1, x10
-    bl __strcat
-    mov x1, x11
-    bl __strcat
-    mov x1, x12
-    bl __strcat
-    mov x1, x14
-    bl __strcat
-    mov x1, x13
-    bl __strcat
-    mov x1, x14
-    bl __strcat
-    mov x1, x15
-    bl __strcat
-
-    ; address in x22 already see changes : x0 & x22 both point to same thing
-
-    bl __strlen
-    cmp x0, #0
-    beq _main_buffer_empty
-
-_main_buffer_empty:                     ; http request buffer (send_buffer) is empty, error with creating one
-
-    mov x0, #1
-    adrp x1, fail_send_buffer_empty @PAGE
-    add x1, x1, fail_send_buffer_empty @PAGEOFF
-    mov x2, #24
-    mov x16, #4
-    svc #0x80
-
-    b _main_program_exit_bad
-
-_main_buffer_empty_end:
-
-    ; send()
-    mov x2, x0                          ; response buffer len
-    ldr x0, [x20]                       ; client socket fd
-    ; send buffer address already in x1
-    mov x3, #0x80000                    ; MSG_NOSIGNAL: prevents SIGPIPE when client close connection
-    mov x16, #101                       ; send syscall: 101
-    svc #0x80
-
-    cmp x0, #0
-    beq _main_data_sent_empty
-    bge _main_data_sent_success
-
-_main_data_sent_fail:                   ; send() < 0
-
-    mov x0, #1
-    adrp x1, fail_send_data_to_client @PAGE
-    add x1, x1, fail_send_data_to_client @PAGEOFF
-    mov x2, #59
-    mov x16, #4
-    svc #0x80
-
-    b _main_main_server_loop
-
-_main_data_sent_success:
-
-    mov x0, #1
-    adrp x1, send_success @PAGE
-    add x1, x1, send_success @PAGEOFF
-    mov x2, #43
-    mov x16, #4
-    svc #0x80
-
-    b _main_main_server_loop
-
-_main_data_sent_empty:                  ; send() == 0, no bytes sent/read error, or client request nothing
-
-    mov x0, #1
-    adrp x1, send_no_data_to_client @PAGE
-    add x1, x1, send_no_data_to_client @PAGEOFF
-    mov x2, #78
-    mov x16, #4
-    svc #0x80
-
-    b _main_main_server_loop
-
-_main_program_exit_good:                ; exit w/ exit code 0: good
-
-    ; exit()
-    mov x0, #0
-    mov x16, #1                         ; exit syscall: 1
-    svc #0x80
-
-    ; free allocated bytes & restore registers
-    ldp x19, x20, [sp], #16
-    ldp x21, x22, [sp], #16
-    ldp x23, x24, [sp], #16
-    ldp x25, x26, [sp], #16
-    ldp x27, x28, [sp], #16
-    mov sp, x29
-    ldp x29, x30, [sp], #16
-    ret
-
-_main_program_exit_bad:                 ; exit w/ exit code 1: bad
-
-    ; exit()
-    mov x0, #1
     mov x16, #1
     svc #0x80
 
-    ; free allocated bytes & restore registers
     ldp x19, x20, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x23, x24, [sp], #16
     ldp x25, x26, [sp], #16
     ldp x27, x28, [sp], #16
-    mov sp, x29
     ldp x29, x30, [sp], #16
     ret
 
-; functions
 
-__htons_16:                             ; x0 -> input, x0 -> output, uint16 implementation
 
+
+
+
+
+
+
+
+
+
+; function representing worker threads
+
+_worker:
+
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!
     stp x29, x30, [sp, #-16]!
-    mov x29, sp
-    lsl x10, x0, #8                     ; new MSB
-    lsr x11, x0, #8                     ; new LSB
-    orr x0, x10, x11                    ; MSB | LSB
-    ; and x0, #0xffff
+    
+
+; using x28 as "pointer arithmetic"/"memory access address" register, try to not pollute main sp
+
+    sub sp, sp, #320                   ; struct kevent events[10]
+
+    ; sub sp, sp, #2459520                ; struct connection_state temp_buf[10]
+
+_worker_loop:
+
+; kevent()
+    adrp x25, kqueue_fd @PAGE
+    add x25, x25, kqueue_fd @PAGEOFF
+    ldr w0, [x25]                       ; kqueue_fd
+    mov x1, #0                          ; (no changes)
+    mov x2, #0
+    add x3, sp, #320                    ; &events[0]
+    mov x4, #10                         ; nevents
+    mov x5, #0                          ; timeout
+    mov x16, #363
+    svc #0x80
+
+/* let's put the complexities of error-checking for later.
+    cmp x0, #0
+    bge _worker_loop_kevent_fail_end
+
+_worker_loop_kevent_fail:
+
+    mov x0, #1
+    adrp x1, fail_kevent @PAGE
+    add x1, x1, fail_kevent @PAGEOFF
+    mov x2, fail_kevent_len
+    mov x16, #4
+    svc #0x80
+
+    b _worker_loop
+
+_worker_loop_kevent_fail_end:*/
+
+    mov x7, x0                          ; ev_count, for for loop
+
+_worker_loop_loop:
+
+    sub x7, x7, #1
+
+    mov x26, #32
+
+    add x28, sp, #320
+    mul x27, x7, x26
+    sub x28, x28, x27
+
+    ldr x6, [x28, #24]                 ; void* udata
+
+    ; progress check
+    ldrb w0, [x6]
+
+    cmp w0, #0
+    beq _worker_loop_loop_reading
+    cmp w0, #1
+    beq _worker_loop_loop_parsing
+    cmp w0, #2
+    beq _worker_loop_loop_writing
+
+    ; requests with progress = "DONE" will fall-through/discarded.
+
+_worker_loop_loop_increment:
+
+    cmp x7, #0
+    bgt _worker_loop_loop
+
+_worker_loop_loop_reading:
+
+    ; read()
+    ldr w0, [x6, #1]                    ; client_fd
+    add x1, x6, #17
+    ldr w5, [x6, #5]
+    add x1, x1, x5                      ; &buffer[0] + bytes_read
+    mov x2, #30720
+    ldr w3, [x6, #5]
+    sub x2, x2, x3                      ; sizeof buffer - bytes_read
+    mov x16, #3
+    svc #0x80
+
+    cmp x0, #0
+    bcs _worker_loop_loop_reading_read_finish
+
+_worker_loop_loop_reading_read_success:
+
+    ; assuming bytes_read is zeroed out
+    ldr w1, [x6, #5]
+    add w1, w1, w0
+    str w1, [x6, #5]
+
+    b _worker_loop_loop_increment
+
+_worker_loop_loop_reading_read_finish:
+
+    ; call strerror on x0, x0 has the positive version of err code, and print descrpition
+    cmp x0, #35
+    bne _worker_loop_loop_reading_read_err
+
+    mov w7, #1
+    strb w7, [x6]                        ; change status to PARSING
+
+    b _worker_loop_loop_increment
+
+_worker_loop_loop_reading_read_err:
+
+    ; for now we're going to be aggressive and close fd on error.
+    ldr w0, [x6, #1]
+    bl __close_fd_64
+
+    b _worker_loop_loop_increment
+
+_worker_loop_loop_parsing:
+
+    ; mainly doing checks for request validity and prepare
+
+    b _worker_loop_loop_increment
+
+_worker_loop_loop_writing:
+
+    ; write()
+    ldr w0, [x6, #1]
+    adrp x1, file_contents_buffer @PAGE
+    add x1, x1, file_contents_buffer @PAGEOFF   ; + total_sent
+    adrp x3, file_contents_len @PAGE
+    add x3, x3, file_contents_len @PAGEOFF
+    ldr w2, [x3]
+    mov x16, #4
+    svc #0x80
+
+    b _worker_loop_loop_increment
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+; read()
+    ldr w0, [x6]
+    ldr w26, [x6, #32]
+    add x9, x6, #66
+    mov x27, #8
+    mul x25, x26, x27
+    add x1, x9, x25 
+    mov x25, #30720
+    sub x2, x25, x26
+    mov x16, #3
+    svc #0x80
+
+    ; check for errors + EAGAIN
+
+    ldr w10, [x6, #32]
+    add x10, x10, x0
+    str w10, [x6, #32]
+
+    mov x11, x6
+    add x11, x11, #66
+    add x11, x11, x26
+    sub x11, x11, #1
+
+    mov x12, #0
+    ldrb w13, [x11]
+    sub x11, x11, #1
+    ldrb w14, [x11]
+
+    cmp w13, #'\r'
+    bne _worker_loop_loop_is_complete_check_1_end
+
+_worker_loop_loop_is_complete_check_1:
+
+    add x12, x12, #1
+
+_worker_loop_loop_is_complete_check_1_end:
+
+    cmp x14, #'\n'
+    bne _worker_loop_loop_is_complete_check_2_end
+
+_worker_loop_loop_is_complete_check_2:
+
+    add x12, x12, #1
+
+_worker_loop_loop_is_complete_check_2_end:
+
+    cmp x12, #2
+    bne _worker_loop_loop_is_not_complete_request
+
+_worker_loop_loop_is_complete_request:
+
+    ;
+
+_worker_loop_loop_is_not_complete_request:
+
+    ; technically "continue" statement so fall-through
+
+_worker_loop_loop_is_complete_request_end:
+
+    ;
+
+    cmp x7, #0
+    bgt _worker_loop_loop
+
+_worker_loop_loop_end:
+
+    b _worker_loop
+
+_worker_exit:
+
+    adrp x26, jjiijj @PAGE
+    add x26, x26, jjiijj @PAGEOFF
+    ldr x25, [x26]
+
+    add sp, sp, x25                     ; give back what is taken
+
+    mov x16, #1
+    svc #0x80
+
+    ldp x19, x20, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x25, x26, [sp], #16
+    ldp x27, x28, [sp], #16
     ldp x29, x30, [sp], #16
     ret
 
-__close_fd_64:                          ; (input: x0 -> file descriptor, output: x0 -> none), force closes a file descriptor
+
+
+
+
+
+
+
+
+
+__close_fd_64:                          ; input: x0
 
     stp x29, x30, [sp, #-16]!
     mov x29, sp
 
-    ; close()
-    mov x16, #6                         ; close syscall: 6
+    mov x16, #6
     svc #0x80
 
     cmp x0, #0
     beq __close_fd_64_exit
 
-__close_fd_64_fail:                     ; close() fail, shutdown() to be safe
+__close_fd_64_fail:
 
-    ; shutdown()
-                                        ; fd already in x0
-    mov x1, #2                          ; SHUT_RDWR: shut down both sides
-    mov x16, #134                       ; shutdown syscall: 134
-    svc #0x80
+    ; this might returns ENOTSOCK for non-socket fds but who cares
+    mov x1, #2                          ; SHUTRDWR: shuts both read/write
+    mov x16, #134
 
 __close_fd_64_exit:
-    
-    ldp x29, x30, [sp], #16
-    ret
-
-/* close_fd 32-bit implementation
-__close_fd_32:                          ; (input: x0 -> file descriptor, output: x0 -> none), force closes a file descriptor
-
-    stp x29, x30, [sp, #-16]!
-    mov x29, sp
-
-    mov x16, #6                         ; close syscall: 6
-    svc #0x80
-
-    cmp x0, #0
-    beq __close_fd_64_exit
-
-__close_fd_32_fail:
-
-    ; shutdown()
-                                        ; fd already in x0
-    mov x1, #2                          ; SHUT_RDWR: shut down both sides
-    mov x16, #134                       ; shutdown syscall: 134
-    svc #0x80
-
-__close_fd_32_exit:
-
-    ldp x29, x30, [sp], #16
-    ret*/
-
-__strlen:                               ; .asciz only (input: x0 -> string addr; output: x0 -> strlen, x1 -> string addr)
-
-    stp x29, x30, [sp, #-16]!
-    mov x29, sp
-    mov x1, x0                          ; move str pointer, prepare for operation
-    
-__strlen_loop:
-
-    ldrb w2, [x0], #1                   ; load byte & move pointer by 1
-    cbnz w2, __strlen_loop              ; continue if not null
-    
-    sub x0, x0, x1                      ; x0 = end - start
-    sub x0, x0, #1                      ; exclude null
-
-    ldp x29, x30, [sp], #16
-    ret
-
-__strcat:                               ; x0 += x1, .asciz only (x0, x1 is str addr)
-
-    stp x29, x30, [sp, #-16]!
-    mov x29, sp
-
-    mov x2, x0
-    mov x0, x1
-    bl __strlen
-    mov x3, x0
-    mov x0, x2
-
-    sub x3, x3, #1                      ; "overwrite" null terminator in x0
-
-__strcat_copy_loop:
-
-    ldrb w4, [x1], #1                   ; load byte & move pointer by 1
-    strb w4, [x0, x3]
-    cbnz w4, __strcat_copy_loop
-
-    ldp x29, x30, [sp], #16
-    ret
-
-__strncat:                              ; x0 += x1, both .asciz only, input: x0, x1 -> str addr, x2 -> x0's max buffer size, x3 -> length to copy from x1; output: x0, x1 -> str addr
-
-    stp x29, x30, [sp, #-16]!
-    mov x29, sp
-
-    mov x5, x2
-    mov x6, x3
-
-    mov x2, x0
-    mov x0, x1
-    bl __strlen
-
-    mov x7, x0
-    add x7, x7, x6
-    sub x7, x7, #1                      ; assuming x0 has null terminator, doesn't count
-    cmp x7, x5
-    bgt __strncat_exit
-
-    mov x3, x0
-    mov x0, x2
-
-__strncat_copy_loop:
-
-    sub x6, x6, #1
-    cmp x6, #0
-    ble __strncat_exit
-    ldrb w4, [x1], #1
-    strb w4, [x0, x3]
-    cbnz w4, __strncat_copy_loop
-
-__strncat_exit:
-
-    ldp x29, x30, [sp], #16
-    ret
-
-__strcmp:                               ; input: x0, x1 -> string addr, output: x2 = (x0 <=> x1)
-
-    stp x29, x30, [sp, #-16]!
-    mov x29, sp
-
-__strcmp_loop:
-
-    ldrb w3, [x1], #1
-    ldrb w4, [x0], #1
-    cmp w3, w4
-    beq __strcmp_loop
-
-    mov x5, #1
-    mov x6, #-1
-
-    cmp w3, w4
-    csel x2, x5, x2, gt
-    csel x2, x6, x2, lt
-    csel x2, xzr, x2, eq
 
     ldp x29, x30, [sp], #16
     ret
@@ -1307,8 +818,32 @@ __num_to_ascii_zero_case:
 
 __num_to_ascii_exit:
     add x1, x1, #1                      ; point to first char
+
+    ; null terminates string
+    ; mov x6, #'\0'
+    ; strb w6, [x1, x2]
+    ; add x2, x2, #1
+
     mov x0, x2                          ; save length in x0
     ; restore registers & return
+    ldp x29, x30, [sp], #16
+    ret
+
+__clear_buf:                            ; input: x0 -> buffer addr, x1 -> buffer len; output: x0 -> buffer addr
+    
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
+    mov w3, #0
+
+__clear_buf_loop:
+
+    strb w3, [x0], #1                   ; set every byte to 0b0 in a recursive loop
+    subs x1, x1, #1
+    bne __clear_buf_loop
+
+__clear_buf_loop_end:
+
     ldp x29, x30, [sp], #16
     ret
 
@@ -1536,11 +1071,11 @@ __strerror:                             ; input: x0 -> error code, output: x0 ->
 
     b __strerror_err_unknown
 
-__strerror_err_0:                       ; 0
+__strerror_err_0:                       ; 0: no errors
 
     adrp x0, err_str_0 @PAGE
     add x0, x0, err_str_0 @PAGEOFF
-    mov x1, #18
+    mov x1, #12
     b __strerror_exit
 
 __strerror_err_1:                       ; EPERM
@@ -2304,151 +1839,118 @@ __strerror_exit:
     ldp x29, x30, [sp], #16
     ret
 
-__clear_buf:                            ; input: x0 -> buffer addr, x1 -> buffer len; output: x0 -> buffer addr
-    
-    stp x29, x30, [sp, #-16]!
-    mov x29, sp
+.section __DATA, __data
 
-    mov w3, #0
+; structs
 
-__clear_buf_loop:
+.align 4
+    address:
+        .byte 16                        ; sin_len
+        .byte 2                         ; sin_family
+        .short 0x5000                   ; sin_port
+        .word 0                         ; sin_addr
+        .space 8                        ; sin_zero
 
-    strb w3, [x0], #1                   ; set every byte to 0b00000000 in a recursive loop
-    subs x1, x1, #1
-    bne __clear_buf_loop_end
+; variables
 
-__clear_buf_loop_end:
-
-    ldp x29, x30, [sp], #16
-    ret
-
-__perror:                               ; input: x0 -> error code, output: void
-
-    stp x29, x30, [sp, #-16]!
-    mov x29, sp
-
-    mov x5, x0
-    bl __strerror
-    mov x3, x0
-    mov x4, x1
-    
-    mov x0, #1
-    adrp x1, err_str_err_code @PAGE
-    add x1, x1, err_str_err_code @PAGEOFF
-    mov x2, err_str_err_code_len
-    mov x16, #4
-    svc #0x80
-
-    mov x0, x5
-    bl __num_to_ascii
-    mov x2, x0
-    mov x0, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #':'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #' '
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, x3
-    mov x2, x4
-    mov x16, #4
-    svc #0x80
-
-    mov x0, #1
-    mov x1, #'\n'
-    mov x2, #1
-    mov x16, #4
-    svc #0x80
-
-    ldp x29, x30, [sp], #16
-    ret
-
-
-; __getcwd:                               ; get current working directory, (input: x0 -> dest str addr, output: x0 -> cwd str addr)
-; 
-;     stp x29, x30, [sp, #-16]!
-;     mov x29, sp
-; 
-;     ;
-; 
-;     ldp x29, x30, [sp], #16
-;     ret
-
-.section  __DATA, __data                ; readable/writable section
+.align 1
+    addrlen: .word 16
 
 .align 2
     server_fd: .word 0
+
 .align 2
-    client_fd: .word 0
+    kqueue_fd: .word 0
+
+.align 2
+    file_contents_len: .word 0
+
+
+
+
+; DO NOT MESS WITH THESE NUMBERS
+
 .align 3
-    valread: .quad 0
-.align 1
-    file_contents_len: .short 0
-.align 2
-    process_id: .word 0
+    ajkljd: .quad 311856
+    jjiijj: .quad 307760
 
-; struct sockaddr_in
-.align 4
-    address:
-        .byte 0                          ; sin_len                       uint8
-        .byte 2                          ; sin_family    AF_INET         unsigned char
-        .short 80                        ; sin_port                      uint8
-        .word 0                          ; sin_addr      INADDR_ANY      uint32
-        .byte 0, 0, 0, 0, 0, 0, 0, 0     ; sin_zero                      char[8]
+.section __DATA, __const
 
-.section  __DATA, __const                ; read only section
+    http_header_1: .asciz "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: "
+    http_header_2: .asciz "\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nX-XSS-Protection: 1; mode=block\r\n\r\n"
+    http_header_1_len = . - http_header_1
+    http_header_2_len = . - http_header_2
 
-; debug messages
+    ; file_contents: .asciz "<!--Basic HTML file for server to serve-->\n<!DOCTYPE html>\n<html>\n<head>\n<title>Website in Assembly</title>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n</head>\n<body>\n<h1>It works!</h1>\n<p>This is a website made from pure Assembly. No C/C++ functions. No frameworks. No external modules/languages. A singular, think and dense .s file. Just pure insanity and CPU instructions.</p>\n</body>\n</html>"
 
-    debug_checkpoint_str: .asciz "here\n" ; 6
-    debug_checkpoint_str_len = . - debug_checkpoint_str
-    debug_cwd: .ascii "\nCurrent directory: "
-    debug_cwd_len = . - debug_cwd
-    debug_open: .ascii "Attempting to open: "
-    debug_open_len = . - debug_open
+    resp: .asciz "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 433\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nX-XSS-Protection: 1; mode=block\r\n\r\n<!--Basic HTML file for server to serve--><!DOCTYPE html><html><head><title>Website in Assembly</title><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head><body><h1>It works!</h1><p>This is a website made from pure Assembly. No C/C++ functions. No frameworks. No external modules/languages. A singular, think and dense .s file. Just pure insanity and CPU instructions.</p></body></html>"
+    resp_len = . - resp
 
-    debug_fd_dir: .asciz "/dev/fd"
+    ; status messages
 
-    debug_print_fd: .asciz "\n[PID, FD opened]: "
-    debug_print_fd_len = . - debug_print_fd
+    msg_before_accept: .asciz "Waiting...\n"
 
-; debug commands & stuff
+    msg_send_success: .asciz "Successful data transmission to the client.\n"
+    msg_send_success_len = . - msg_send_success
 
-    cmd_shell_path: .asciz "/bin/sh"
-    cmd_dash_c: .asciz "-c"
-    cmd_lsof_f: .asciz "lsof -p "
-    cmd_lsof_s: .asciz " > /Users/trangtran/Desktop/coding_files/assembly_shi/ARM-assembly-web-server/fds.txt"
+    msg_send_none: .asciz "0 bytes sent to the client.\n"
+    msg_send_none_len = . - msg_send_none
 
-.align 5
-    cmd_lsof_argv:
-        .quad cmd_shell_path
-        .quad cmd_dash_c
-        .quad cmd_buffer
-        .quad 0
+    msg_show_sent_bytes: .asciz "Successfully sent (bytes): "
+    msg_show_sent_bytes_len = . - msg_show_sent_bytes
 
-.align 2
-    dirent_struct:
-        .quad 0     ; d_ino
-        .quad 0     ; d_seekoff
-        .short 0    ; d_reclen
-        .short 0    ; d_namlen
-        .space 1024 ; d_name
+    msg_show_sent_bytes_: .asciz "Failed to send complete response: "
+    msg_show_sent_bytes_len_ = . - msg_show_sent_bytes_
 
-; error messages
+    ; error messages
+    fail_create_socket: .asciz "Failed to establish socket on server side.\n"
+    fail_create_socket_len = . - fail_create_socket
+
+    fail_bind_socket: .asciz "Failed to bind server side socket.\n"
+    fail_bind_socket_len = . - fail_bind_socket
+
+    fail_listen_socket: .asciz "Failed to enable listening on server side socket.\n"
+    fail_listen_socket_len = . - fail_listen_socket
+
+    fail_accept_conn: .asciz "Failed to establish socket on client side.\n"
+    fail_accept_conn_len = . - fail_accept_conn
+
+    fail_read_request: .asciz "General read error encountered while trying to read client's request.\n"
+    fail_read_request_len = . - fail_read_request
+
+    fail_request_overflow: .asciz "A client's request might trigger a buffer overflow.\n"
+    fail_request_overflow_len = . - fail_request_overflow
+
+    fail_client_disconnected: .asciz "A client is disconnected from the server.\n"
+    fail_client_disconnected_len = . - fail_client_disconnected
+
+    fail_send_data: .asciz "A client failed to receive data. Tries: \n"
+    fail_send_data_len = . - fail_send_data
+
+    fail_send_data_max_retries: .asciz "Failed to send data after retries: "
+    fail_send_data_max_retries_len = . - fail_send_data_max_retries
+
+    fail_kqueue_fd: .asciz "Failed to initialize kqueue."
+    fail_kqueue_fd_len = . - fail_kqueue_fd
+
+    fail_kevent: .asciz "kevent() failed. Continuing..."
+    fail_kevent_len = . - fail_kevent
+
+    fail_load_file: .asciz "Failed to open file "
+    fail_load_file_len = . - fail_load_file
+
+    fail_get_file_info: .asciz "Failed to retrieve file information."
+    fail_get_file_info_len = . - fail_get_file_info
+
+    fail_file_empty: .asciz "Specified file is empty"
+    fail_file_empty_len = . - fail_file_empty
+
+    fail_read_file: .asciz "Failed to read file."
+    fail_read_file_len = . - fail_read_file
 
 ; messages for strerror(), supports errno = 1 - 35, 41 - 66
-; general errors
-    err_str_0: .ascii "Undefined error: 0"                               ; 0
+; general/IO errors
+    err_str_0: .ascii "No errors: 0"                                     ; 0
     err_str_1: .ascii "Operation not permitted"                          ; EPERM
     err_str_2: .ascii "No such file or directory"                        ; ENOENT
     err_str_3: .ascii "No such process"                                  ; ESRCH
@@ -2566,106 +2068,281 @@ __perror:                               ; input: x0 -> error code, output: void
     err_str_err_code: .ascii "Error code: -"
     err_str_err_code_len = . - err_str_err_code
 
-    fail_file_open: .ascii "Failed to open file " ; 20
-    fail_file_open_: .ascii "; open() return error code: " ; 28
+; common punctuations:
 
-    fail_file_open_no_exist: .ascii "File doesnt exist in specified directory: " ; 42
-    fail_file_open_no_permission: .ascii "No permission to open file: " ; 28
-    fail_file_open_bad_addr: .ascii "File name pointer invalid for file: " ; 36
+    p_newline: .ascii "\n"
+    p_terminator: .ascii "\0"
+    p_forward_slash: .ascii "/"
+    p_dot: .ascii "."
 
-    fail_get_file_info: .ascii "Failed to retrieve information for file: "
+; option for setsockopt()
 
-    fail_file_empty: .ascii "File is likely empty or an error occured: "
-    fail_file_empty_len = . - fail_file_empty
+    opt: .word 1
 
-    fail_file_read: .ascii "An error occured when reading the file, or the file is empty: "
-    fail_file_read_len = . - fail_file_read
+.section __DATA, __bss
 
-    fail_file_close: .ascii "Failed to close file: "
+    incoming_buffer: .space 30721
+    nta_buffer: .space 32
+    file_contents_buffer: .space 65536
 
-    fail_file_read_size: .ascii "Error retrieving file length: "
-    fail_file_read_size_len = . - fail_file_read_size
+    stat_struct: .space 200
 
-; http stuff
+; connection pool
+;   conn_state_pool: .space 30856
 
-    http_header: .ascii "HTTP/1.1 200 Ok\r\n" ; 25
-    http_content_type: .ascii "Content-Type: text/html\r\n" ; 26
-    http_content_length: .ascii "Content-Length: " ; 16
-    http_content_security: .ascii "Connection: close\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nX-XSS-Protection: 1; mode=block\r\n" ; 116
+.section __TEXT, __cstring
 
-    line_break: .ascii "\r\n" ; 2
-    str_newline: .ascii "\n"
-    str_terminator: .ascii "\0"
+    response: .asciz "Hello, World!"
 
-.align 2
-    addrlen: .word 16
-
-    port: .byte 80
-
-.align 2
-    backlog: .word 16384
-
-; status / update messages
-    msg_accept_conn: .asciz "\nAccepted a connection. Processing...\n"
-    msg_accept_conn_len = . - msg_accept_conn
-
-    msg_show_server_fd: .ascii "Server file descriptor: "
-    msg_show_server_fd_len = . - msg_show_server_fd
-
-    msg_show_file_fd: .ascii " file descriptor: "
-    msg_show_file_fd_len = . - msg_show_file_fd
-
-    msg_show_client_fd: .ascii "Client socket fd: "
-    msg_show_client_fd_len = . - msg_show_client_fd
-
-    msg_show_bytes_read: .ascii "\nBytes read: "
-    msg_show_bytes_read_len = . - msg_show_bytes_read
-
-    msg_show_proc_num: .ascii "\nProcess ID (for debugging purposes): "
-    msg_show_proc_num_len = . - msg_show_proc_num
-
-    msg_show_file_contents: .ascii "File contents of file "
-    msg_show_file_contents_len = . - msg_show_file_contents
-
-
-.section __DATA, __bss                  ; auto zeroed at startup
-
-; buffers
-    incoming_buffer: .space 30721       ; incoming connections buffer
-    file_contents: .space 30000         ; html file content buffer
-    stat_struct: .space 200             ; file stat buffer, for file size
-    send_buffer: .space 30000           ; outgoing response buffer
-    general_buffer: .space 2048         ; general buffer for functions
-    nta_buffer: .space 32               ; __num_to_ascii's buffer
-
-; for debugging purposes
-    cmd_buffer: .space 256              ; for concatenating strings for a command
-    get_fd_buffer: .space 4096          ; for retrieving fds from /dev/fd
-
-
-.section  __TEXT, __cstring             ; null terminated strings & read only strings here
-
-    fail_send_buffer_empty: .asciz "Send buffer is empty.\n"
-    fail_send_data_to_client: .asciz "Failed to send data to client. The lion can't care less.\n"
-    
-    msg_waiting_conn: .asciz "\nWaiting for new connection...\n\n"
-    
-    read_success: .asciz "Successfully read from client. Message: \n"
-    read_disconnected: .asciz "A client is disconnected from the server.\n"
-    read_buffer_overflow: .asciz "A client's packet could trigger a buffer overflow.\n"
-    read_err_unknown: .asciz "An unknown error encountered when trying to read the client's request.\n"
-    
-    fail_in_socket: .asciz "In sockets\n"
-    fail_in_bind: .asciz "In bind\n"
-    fail_in_listen: .asciz "In listen\n"
-    fail_create_socket: .asciz "Failed to create client socket.\nError code: "
-    fail_create_socket_len = . - fail_create_socket
-    
-    send_success: .asciz "Successfully transmitted data to client.\n"
-    send_no_data_to_client: .asciz "The client requested no data or a general read and write error encountered.\n"
+    debug_checkpoint_str: .asciz "here"
+    debug_checkpoint_str_len = . - debug_checkpoint_str
 
     filename: .asciz "/Users/trangtran/Desktop/coding_files/assembly_shi/ARM-assembly-web-server/template.html"
     filename_len = . - filename
 
-    str_one_dot: .asciz "."
-    str_two_dot: .asciz ".."
+/* MPMC Queue */
+
+.global _main
+/*enum connection_progress {
+    READING,
+    PARSING,
+    WRITING,
+    DONE
+};
+
+struct connection_state {            // Offset
+    enum connection_progress status; // 0       int8
+    uint32_t client_fd;              // 1
+    uint32_t bytes_read;             // 5
+    uint32_t total_sent;             // 9
+    uint32_t total_length;           // 13
+    char buffer[30721];              // 17
+};*/
+_main:
+
+    ret
+
+; capacity in x0
+_queue_alloc:
+
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
+    mov x0, #1024
+
+    mov x25, x0
+
+    adrp x1, index_mask @PAGE
+    add x1, x1, index_mask @PAGEOFF
+    mov x2, x0
+    sub x2, x2, #1
+    str x2, [x1]
+
+    adrp x0, storage @PAGE
+    add x0, x0, storage @PAGEOFF
+    adrp x1, buffer @PAGE
+    add x1, x1, buffer @PAGEOFF
+    str x0, [x1]
+
+    ; buffer already zeroed out so we're chilling
+
+    mov x9, x25
+    mov x11, #0x7818
+    mul x9, x9, 
+    adrp x1, buffer @PAGE
+    add x1, x1, buffer @PAGEOFF
+
+_queue_alloc_loop:
+
+    sub x9, x9, #1
+    mul x12, x9, x11
+    add x10, x1, x12
+    prfm pldl1strm, x10
+    cbnz x9, _queue_alloc_loop
+
+; loop ends here
+
+    dmb ish
+
+    ldp x29, x30, [sp], #16
+    ret
+
+_queue_dealloc:
+
+    ; discard everything in queue
+    ret
+
+_queue_new:
+
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
+    ; fetch add explicit
+    adrp x0, enqueue_pos @PAGE
+    add x0, x0, enqueue_pos @PAGEOFF
+    mov x1, #1
+
+    mov x22, sp
+    sub sp, sp, #20                     ; space for 2 x uint64 + uint32
+    sub x23, sp, #12
+    sub x24, sp, #4
+
+_queue_new_1:
+
+    ldaxr x22, [x0]
+    add x23, x22, x1
+    stlxr w24, x23, [x0]
+    cbnz w24, _queue_new_1
+
+    ldr x2, [x22]
+    adrp x3, index_mask @PAGE
+    add x3, x3, index_mask @PAGEOFF
+    ldr x6, [x3]
+    and x2, x2, x6
+    
+    adrp x5, sizeof_slot @PAGE
+    add x5, x5, sizeof_slot @PAGEOFF
+    ldr x4, [x5]
+    mul x7, x2, x4
+    
+    adrp x1, buffer @PAGE
+    add x1, x1, buffer @PAGEOFF
+    add x1, x1, x2
+
+    mov x19, x1                         ; slot* slot
+
+    ; prefetch write two slots ahead
+    add x2, x2, #1
+    and x2, x2, x6
+    mul x7, x2, x4
+    prfm pstl1keep, x7
+    add x2, x2, x4
+    and x2, x2, x6
+    mul x7, x2, x4
+    prfm pstl1keep, x7
+
+    sub sp, sp, #12
+    str wzr, [sp, #-4]                  ; spin_count
+
+_queue_spin_loop:
+
+    sub sp, sp, #8
+    sub x27, sp, #8
+    ldar x25, [x19]                     ; slot.sequence in offset 0
+    add sp, sp, #8
+    ldr x21, [x22]                      ; x22 has &pos
+    cmp x25, x21
+    bne _queue_spin_loop_slot_empty_end
+
+_queue_spin_loop_slot_empty:
+
+    b _queue_spin_loop_end
+
+_queue_spin_loop_slot_empty_end:
+
+    cmp x25, x21
+    bge _queue_spin_loop_next_iteration
+    sub x7, x21, x25
+    adrp x6, capacity @PAGE
+    add x6, x6, capacity @PAGEOFF
+    ldr w5, [x6]
+    cmp x7, x5
+    blt _queue_spin_loop_next_iteration
+
+    ldr w3, [sp, #-4]
+    add w3, w3, #1
+    str w3, [sp, #-4]
+
+    cmp w3, #64
+    blt _queue_spin_loop_yield_short
+    cmp w3, #256
+    blt _queue_spin_loop_yield_medium
+    b _queue_spin_loop_yield_long
+
+_queue_spin_loop_yield_short:
+
+    yield
+
+_queue_spin_loop_yield_medium:
+
+    yield
+    yield
+    yield
+    yield
+
+_queue_spin_loop_yield_long:
+
+    yield
+    yield
+    yield
+    yield
+    yield
+    yield
+    yield
+    yield
+    yield
+    yield
+    yield
+    yield
+    yield
+    yield
+    yield
+    yield
+
+    cmp w3, #1000
+    ble _queue_spin_loop_yield_long_reset_spin_counter_end
+
+_queue_spin_loop_yield_long_reset_spin_counter:
+
+    mov w3, #256
+
+_queue_spin_loop_yield_long_reset_spin_counter_end:
+
+    b _queue_spin_loop
+    
+_queue_spin_loop_next_iteration:
+
+    yield
+
+    b _queue_spin_loop
+
+_queue_spin_loop_end:
+
+    prfm pstl1keep, x19
+
+    
+
+    add sp, sp, #12
+    add sp, sp, #20
+
+    ldp x29, x30, [sp], #16
+    ret
+
+_queue_recycle:
+
+    ;
+
+.section __DATA, __data
+
+.align 3
+    buffer: .quad 0                     ; ptr to storage
+.align 3
+    enqueue_pos: .quad 0
+.align 3
+    dequeue_pos: .quad 0
+.align 3
+    index_mask: .quad 0
+.align 3
+    sizeof_slot: .quad 30744
+.align 3:
+    capacity: .word 1024
+
+
+.section __DATA, __const
+
+.align 2
+    max_size: .word 1024
+
+.section __DATA, __bss
+
+storage: .space 251854848               ; storage[]

@@ -1,4 +1,10 @@
 server
+_server.s
+_server
+__server.s
+__server
+mpmc.s
+mpmc
 asdf.txt
 random.txt
 fds.txt

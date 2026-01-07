@@ -2,11 +2,11 @@
 
 ## Overview
 
-A basic HTTP web server written in ARM assembly using Apple's AArch64 architecture. This project is built in pure assembly, all kernel functions are replaced with raw syscalls. Certain function with no kernel implementation are also implemented in Assembly as well.
+A basic HTTP web server written in ARM Assembly with Apple's ARMv8.6 AArch64 architecture.
 
 ### ETA:
 
-This server is a work in progress and bugs are everywhere. I can't guarantee any deadlines on the completion of this project.
+This server is barely working with basic functionalities, but I plan to implement a lot more features including concurrency, kqueue (similar to epoll in Linux), and 
 
 ## Documentation
 
